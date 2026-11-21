@@ -2,7 +2,7 @@
 
 一只常驻 Windows 桌面的二次元 Q 版萌宠。透明置顶、可拖拽、会撒娇，后续还会陪你敲键盘、盯番茄钟。
 
-> 当前状态：**M4 已完成**（Focus 模式、全局按键气泡、鼠标垫映射跟随），下一步进入打包与打磨。
+> 当前状态：**M5 已完成**（NSIS 安装包、应用图标、开机自启、运行日志），下一步进入正式素材替换与性能打磨。
 
 ## 技术栈
 
@@ -33,7 +33,7 @@ npm rebuild electron koffi esbuild
 npm run dev
 ```
 
-启动后屏幕左上角会出现一个橙色圆形占位角色，可以拖拽（松手自动吸附在屏幕内），**右键角色**可开启番茄钟（默认时长或键盘输入 1~999 分钟）、切换 Focus 模式与按键气泡；右下角托盘图标提供显示/隐藏、置顶开关和退出。
+启动后屏幕左上角会出现一个橙色圆形占位角色，可以拖拽（松手自动吸附在屏幕内），**右键角色**可开启番茄钟（默认时长或键盘输入 1~999 分钟）、切换 Focus 模式与按键气泡；右下角托盘图标提供显示/隐藏、置顶开关、开机自启和退出。
 
 Focus 模式下角色会变成「坐在书桌前敲键盘」的样子，右手会跟随你的鼠标在鼠标垫上移动；敲键盘时右上角会短暂显示按键名。
 
@@ -47,6 +47,17 @@ Focus 模式下角色会变成「坐在书桌前敲键盘」的样子，右手�
 | `npm run build` | 构建 main / preload / renderer 到 `out/` |
 | `npm run preview` | 以生产构建产物启动 |
 | `npm run typecheck` | 对 node 端与 web 端分别做 TypeScript 类型检查 |
+| `npm run dist` | 构建并打包 Windows x64 安装包到 `release/` |
+
+打包首次运行需要下载 Electron 与 NSIS 工具链，国内建议先设置镜像：
+
+```powershell
+$env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
+$env:ELECTRON_BUILDER_BINARIES_MIRROR = "https://npmmirror.com/mirrors/electron-builder-binaries/"
+npm run dist
+```
+
+产物为 `release/SillyPup-0.1.0-x64-setup.exe`：NSIS 安装包，**按用户安装**（默认装到 `%LOCALAPPDATA%\Programs`），不需要管理员权限，安装时可改目录。
 
 ## 目录结构
 
@@ -65,6 +76,8 @@ SillyPup/
 │  │  ├─ prompt.ts           # 自定义时长输入窗口（1~999 分钟）
 │  │  ├─ keyPoller.ts        # 全局按键轮询（差集去重 + 限流）
 │  │  ├─ cursorPoller.ts     # 全局光标轮询（Focus 模式鼠标垫映射用）
+│  │  ├─ autoLaunch.ts       # 开机自启（HKCU Run 登录项）
+│  │  ├─ logger.ts           # 主进程日志（userData/logs/main.log）
 │  │  └─ config.ts           # userData 配置读写
 │  ├─ preload/               # contextBridge 白名单 API
 │  ├─ renderer/              # 渲染层（React）
@@ -79,7 +92,9 @@ SillyPup/
 │  │     ├─ prompt.tsx       # 自定义时长页面入口
 │  │     └─ {main.tsx, App.tsx, index.css}
 │  └─ shared/                # 主进程与渲染层共用类型
-├─ resources/icon.png        # 托盘占位图标
+├─ build/                    # 打包资源：icon.png / icon.ico
+├─ resources/icon.png        # 运行时托盘图标
+├─ electron-builder.yml      # NSIS 打包配置
 ├─ electron.vite.config.ts
 ├─ tsconfig*.json
 └─ package.json
@@ -97,6 +112,9 @@ SillyPup/
 - **命中判定用 alpha 掩码**：窗口常驻 `setIgnoreMouseEvents(true, { forward: true })`，渲染层每 120ms 上报 64×64 降采样掩码与角色包围盒，主进程在 60Hz 轮询中用掩码判断光标是否真的压在角色身上，命中才切回可交互。点角色响应、点空白穿透到下层程序，两者共用同一判定源。
 - **番茄钟只认绝对时间戳**：记录 `deadline = Date.now() + 时长`，每秒用 `deadline - Date.now()` 重算，而不是「每秒减一」。系统睡眠期间定时器不走，累加必然偏差；`powerMonitor.resume` 后立刻重算一次，睡眠中跨过 deadline 会直接判定完成。
 - **自定义时长用独立输入窗口**：桌宠窗口是 `focusable:false`，原生菜单在该窗口下既不能承载文本输入也不支持键盘操作。因此菜单项「自定义时长…」只负责唤起一个可聚焦的无边框小窗口，用户在窗口内键盘输入 1~999 分钟，确认后写入配置并开始计时。
+- **打包与原生模块**：electron-builder + NSIS，按用户安装（`perMachine:false`）避免提权；`koffi` 是原生模块，通过 `asarUnpack` 解包才能 `dlopen`，同时关闭 `npmRebuild`（koffi 自带各平台预编译二进制，不需要 node-gyp）。
+- **开机自启按用户维度**：写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，不碰机器级注册表。开发模式下注册的是 `electron.exe` 并附带项目路径参数，打包后只注册自身 exe；每次启动按配置重新同步一次，用户手动删掉登录项后会自愈。
+- **日志写在用户目录**：桌宠没有控制台窗口，`userData/logs/main.log` 记录启动、番茄钟完成与未捕获异常，超过 1MB 轮转为 `main.old.log`，避免无限增长。
 
 更完整的架构、状态机、素材管线与风险清单见 [技术方案](桌宠项目-技术方案.md)。
 
@@ -109,7 +127,7 @@ SillyPup/
 | M2 | alpha 掩码命中判定、点击穿透切换、点击互动与冷却 | 已完成 |
 | M3 | 番茄钟、置顶气泡、睡眠唤醒计时校准 | 已完成 |
 | M4 | Focus Mode、键盘气泡、鼠标垫映射跟随 | 已完成 |
-| M5 | 打包（NSIS）、开机自启、图标、日志 | 待开始 |
+| M5 | 打包（NSIS）、开机自启、图标、日志 | 已完成 |
 | M6 | 正式素材替换、性能打磨 | 待开始 |
 
 ## 已知限制
@@ -135,7 +153,15 @@ SillyPup/
 
 **托盘图标不显示**
 
-确认 `resources/icon.png` 存在。开发模式下图标路径基于 `app.getAppPath()` 解析，打包后需同步调整 `electron-builder` 的 `extraResources` 配置。
+确认 `resources/icon.png` 存在。开发模式下图标路径基于 `app.getAppPath()` 解析；打包后改用 `process.resourcesPath/resources/icon.png`，对应 `electron-builder.yml` 的 `extraResources`。
+
+**安装包提示「Windows 已保护你的电脑」**
+
+当前安装包未做代码签名，SmartScreen 会对未知发布者拦截。点「更多信息 → 仍要运行」即可；正式发布前需购买证书并配置 electron-builder 的签名。
+
+**运行出了问题去哪里看日志**
+
+`%APPDATA%\silly-pup\logs\main.log`（打包版与开发版共用同一个 userData）。旧日志在同目录的 `main.old.log`。
 
 ## License
 

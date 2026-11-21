@@ -9,12 +9,15 @@ export interface AppConfig {
   focusMode: boolean
   /** 全局按键气泡开关 */
   keyBubble: boolean
+  /** 开机自启（写入 HKCU\...\Run） */
+  autoLaunch: boolean
 }
 
 const DEFAULTS: AppConfig = {
   pomodoroMinutes: 25,
   focusMode: false,
-  keyBubble: true
+  keyBubble: true,
+  autoLaunch: false
 }
 
 let cache: AppConfig | null = null
@@ -39,7 +42,8 @@ export function loadConfig(): AppConfig {
             ? raw.pomodoroMinutes
             : DEFAULTS.pomodoroMinutes,
         focusMode: typeof raw.focusMode === 'boolean' ? raw.focusMode : DEFAULTS.focusMode,
-        keyBubble: typeof raw.keyBubble === 'boolean' ? raw.keyBubble : DEFAULTS.keyBubble
+        keyBubble: typeof raw.keyBubble === 'boolean' ? raw.keyBubble : DEFAULTS.keyBubble,
+        autoLaunch: typeof raw.autoLaunch === 'boolean' ? raw.autoLaunch : DEFAULTS.autoLaunch
       }
       return cache
     }

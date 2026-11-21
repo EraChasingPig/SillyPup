@@ -11,8 +11,13 @@ import { promptMinutes } from './prompt'
 import { startKeyPoller } from './keyPoller'
 import { startCursorPoller } from './cursorPoller'
 import { loadConfig, saveConfig } from './config'
+import { setupLogger, logInfo } from './logger'
+import { applyAutoLaunch } from './autoLaunch'
 import { IPC_CHANNELS } from '../shared/types'
 import type { FocusState, HitMask, PetInputEvent } from '../shared/types'
+
+// 日志最早就绪，后续启动失败也能留下线索
+setupLogger()
 
 // 单实例：用户双击两次只会聚焦已有实例（技术方案 2.5）
 const gotLock = app.requestSingleInstanceLock()
@@ -31,20 +36,28 @@ if (!gotLock) {
   const bubble = new BubbleWindow()
   const config = loadConfig()
 
+  // 任务栏 / 通知归属需要固定的 AppUserModelID，与 electron-builder 的 appId 保持一致
+  app.setAppUserModelId('com.sillypup.desktop')
+
   app.on('second-instance', () => {
     if (win && !win.isVisible()) win.show()
   })
 
   app.whenReady().then(() => {
+    // 每次启动按配置同步一次登录项，防止用户手动删掉注册表后状态不一致
+    applyAutoLaunch(config.autoLaunch)
+    logInfo(`app ready, userData=${app.getPath('userData')}`)
+
     const petWindow = createPetWindow()
     win = petWindow
-    tray = createTray(petWindow)
+    tray = createTray(petWindow, config)
 
     const service = new PomodoroService({
       onTick: (remainMs, running) => {
         petWindow.webContents.send(IPC_CHANNELS.POMODORO_TICK, { remainMs, running })
       },
       onDone: () => {
+        logInfo('pomodoro done')
         petWindow.webContents.send(IPC_CHANNELS.POMODORO_DONE)
         bubble.show(petWindow, '时间到咯，休息两分钟吧')
       }
@@ -130,6 +143,7 @@ if (!gotLock) {
   })
 
   app.on('before-quit', () => {
+    logInfo('before-quit')
     stopInteraction?.()
     stopKeyPoller?.()
     stopCursorPoller?.()

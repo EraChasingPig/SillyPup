@@ -1,0 +1,43 @@
+appId: com.sillypup.desktop
+productName: 樱羽艾玛小笨狗
+copyright: Copyright © 2026 SillyPup
+
+directories:
+  buildResources: build
+  output: release
+
+# electron-vite 的产物在 out/，源码与素材不打进 asar
+files:
+  - out/**
+  - package.json
+
+# 托盘图标按 process.resourcesPath/resources/icon.png 读取
+extraResources:
+  - from: resources
+    to: resources
+
+# koffi 是原生模块，必须解包才能 dlopen
+asarUnpack:
+  - node_modules/koffi/**
+
+# koffi 自带各平台预编译二进制，不需要 node-gyp 重建
+npmRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  # 安装目录与快捷方式名保持 ASCII，避免部分环境下的路径编码问题
+  executableName: SillyPup
+  artifactName: SillyPup-${version}-${arch}-setup.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 樱羽艾玛小笨狗
+  uninstallDisplayName: 樱羽艾玛小笨狗
+  deleteAppDataOnUninstall: false
