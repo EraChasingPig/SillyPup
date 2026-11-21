@@ -1,9 +1,25 @@
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
+import { IPC_CHANNELS } from '../shared/types'
+import type { HitMask, PetInputEvent } from '../shared/types'
 
-// M0 阶段拖拽由主进程轮询驱动，渲染层暂不需要 IPC 通道。
-// 后续 M2/M3 通过 contextBridge 暴露白名单 API（见技术方案 3.3）。
 const api = {
-  platform: process.platform
+  platform: process.platform,
+
+  /** 渲染层 → 主进程：上报命中掩码（决定鼠标穿透与否） */
+  reportMask: (mask: HitMask): void => {
+    ipcRenderer.send(IPC_CHANNELS.MASK, mask)
+  },
+
+  /** 主进程 → 渲染层：订阅点击 / 拖拽输入事件，返回取消订阅函数 */
+  onPetInput: (cb: (e: PetInputEvent) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: PetInputEvent): void => {
+      cb(payload)
+    }
+    ipcRenderer.on(IPC_CHANNELS.INPUT, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.INPUT, handler)
+    }
+  }
 }
 
 contextBridge.exposeInMainWorld('api', api)

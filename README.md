@@ -52,10 +52,11 @@ npm run dev
 SillyPup/
 ├─ src/
 │  ├─ main/                  # 主进程
-│  │  ├─ index.ts            # 生命周期、单实例锁、加载渲染层
+│  │  ├─ index.ts            # 生命周期、单实例锁、IPC 注册
 │  │  ├─ window.ts           # 透明 / 无边框 / 置顶 / 不可聚焦窗口
 │  │  ├─ tray.ts             # 托盘菜单
-│  │  └─ dragController.ts   # 光标轮询拖拽 + 屏幕边界限制
+│  │  ├─ interaction.ts      # 光标轮询：穿透切换、点击判定、拖拽
+│  │  └─ hitMask.ts          # alpha 命中掩码存储与窗口内坐标查询
 │  ├─ preload/               # contextBridge 白名单 API
 │  ├─ renderer/              # 渲染层（React）
 │  │  ├─ index.html
@@ -78,6 +79,7 @@ SillyPup/
 - **坐标一律使用 DIP**：`screen.getCursorScreenPoint()` 与 `display.workArea` 返回的都是 DIP，混用物理像素会在 125%/150% 缩放下产生拖拽漂移。
 - **边界限制用 `workArea` 而非 `bounds`**：`workArea` 已排除任务栏，不会把桌宠藏到任务栏下面导致找不回。
 - **全局按键用轮询而非键盘钩子**：`WH_KEYBOARD_LL` 的行为特征与键盘记录器一致，容易触发杀软误报；按 30~60Hz 轮询 `GetAsyncKeyState` 足以满足「显示按键名」的需求，且不装钩子。
+- **命中判定用 alpha 掩码**：窗口常驻 `setIgnoreMouseEvents(true, { forward: true })`，渲染层每 120ms 上报 64×64 降采样掩码与角色包围盒，主进程在 60Hz 轮询中用掩码判断光标是否真的压在角色身上，命中才切回可交互。点角色响应、点空白穿透到下层程序，两者共用同一判定源。
 
 更完整的架构、状态机、素材管线与风险清单见 [技术方案](桌宠项目-技术方案.md)。
 
@@ -87,7 +89,7 @@ SillyPup/
 | --- | --- | --- |
 | M0 | 透明置顶窗口、托盘、单实例、拖拽与边界限制 | 已完成 |
 | M1 | 动画播放器 + 状态机（Idle/Action/Interact/Grabbed/Dragging/Dropped/Land） | 已完成 |
-| M2 | alpha 掩码命中判定、点击穿透切换、点击互动与冷却 | 待开始 |
+| M2 | alpha 掩码命中判定、点击穿透切换、点击互动与冷却 | 已完成 |
 | M3 | 番茄钟、置顶气泡、睡眠唤醒计时校准 | 待开始 |
 | M4 | Focus Mode、键盘气泡、鼠标垫映射跟随 | 待开始 |
 | M5 | 打包（NSIS）、开机自启、图标、日志 | 待开始 |
@@ -97,7 +99,6 @@ SillyPup/
 
 - 仅支持 Windows，未做 macOS / Linux 适配。
 - 角色目前是占位色块，尚未接入真实素材。
-- 尚未实现点击穿透：当前窗口整体可点击，暂不支持「点空白处穿透到下层程序」。
 - 无法捕获以管理员权限运行的前台程序的按键（Windows UIPI 限制，不打算通过提权规避）。
 
 ## 文档
