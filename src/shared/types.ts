@@ -57,6 +57,23 @@ export const IPC_CHANNELS = {
   /** 渲染层 → 主进程：上报新的命中掩码 */
   MASK: 'pet:mask',
   /** 主进程 → 渲染层：点击 / 拖拽输入事件 */
-  INPUT: 'pet:input'
+  INPUT: 'pet:input',
+  /** 主进程 → 渲染层：番茄钟每秒心跳 */
+  POMODORO_TICK: 'pomodoro:tick',
+  /** 主进程 → 渲染层：番茄钟结束 */
+  POMODORO_DONE: 'pomodoro:done',
+  /** 自定义时长输入窗口：确认 */
+  PROMPT_SUBMIT: 'prompt:submit',
+  /** 自定义时长输入窗口：取消 */
+  PROMPT_CANCEL: 'prompt:cancel'
 } as const
+
+export interface PomodoroTick {
+  remainMs: number
+  running: boolean
+}
+
+/** 自定义时长的合法范围（分钟） */
+export const POMODORO_MIN_MINUTES = 1
+export const POMODORO_MAX_MINUTES = 999
 

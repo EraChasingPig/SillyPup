@@ -1,0 +1,69 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.bubble-wrap {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  animation: bubble-pop 200ms ease-out;
+}
+
+@keyframes bubble-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.bubble {
+  max-width: 292px;
+  padding: 18px 24px;
+  border-radius: 20px;
+  background: linear-gradient(160deg, #fffaf5 0%, #ffe9d6 100%);
+  border: 2px solid #ffb877;
+  box-shadow: 0 6px 18px rgba(200, 130, 60, 0.25);
+}
+
+.bubble-text {
+  font-size: 15px;
+  line-height: 1.65;
+  color: #6b4423;
+  text-align: center;
+  font-family: 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
+  letter-spacing: 0.5px;
+}
+
+.bubble-tail {
+  width: 16px;
+  height: 16px;
+  margin-top: -9px;
+  background: #ffe9d6;
+  border-right: 2px solid #ffb877;
+  border-bottom: 2px solid #ffb877;
+  transform: rotate(45deg);
+  border-radius: 0 0 4px 0;
+}

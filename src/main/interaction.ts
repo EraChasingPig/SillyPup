@@ -4,15 +4,20 @@ import type { PetInputEvent, Point, Size } from '../shared/types'
 import type { HitMaskStore } from './hitMask'
 
 const VK_LBUTTON = 0x01
+const VK_RBUTTON = 0x02
 /** 5px 阈值区分短按点击与长按拖拽（技术方案 B4） */
 const DRAG_THRESHOLD = 5
 
-// 通过 user32.GetAsyncKeyState 检测鼠标左键（轮询方案，不装钩子）
+// 通过 user32.GetAsyncKeyState 检测鼠标按键（轮询方案，不装钩子）
 const user32 = koffi.load('user32.dll')
 const GetAsyncKeyState = user32.func('short __stdcall GetAsyncKeyState(int vKey)')
 
 function isLeftButtonDown(): boolean {
   return (GetAsyncKeyState(VK_LBUTTON) & 0x8000) !== 0
+}
+
+function isRightButtonDown(): boolean {
+  return (GetAsyncKeyState(VK_RBUTTON) & 0x8000) !== 0
 }
 
 function clamp(v: number, min: number, max: number): number {
@@ -45,13 +50,15 @@ function clampToWorkArea(p: Point, size: Size): Point {
 export function startInteraction(
   win: BrowserWindow,
   maskStore: HitMaskStore,
-  onInput: (e: PetInputEvent) => void
+  onInput: (e: PetInputEvent) => void,
+  onContextMenu: (local: Point) => void
 ): () => void {
   let pressed = false
   let dragStarted = false
   let pressPoint: Point = { x: 0, y: 0 }
   let grabOffset: Point = { x: 0, y: 0 }
   let prevDown = false
+  let prevRightDown = false
   let ignoring = true
 
   // 启动即穿透，等渲染层上报掩码后再按命中情况切换
@@ -74,6 +81,13 @@ export function startInteraction(
 
     const pressEdge = down && !prevDown
     const releaseEdge = !down && prevDown
+
+    // 右键只在「按下沿 + 命中角色」时弹菜单，避免拖拽过程中误弹
+    const rightDown = isRightButtonDown()
+    if (rightDown && !prevRightDown && hit) {
+      onContextMenu(local)
+    }
+    prevRightDown = rightDown
 
     if (pressEdge && hit) {
       pressed = true

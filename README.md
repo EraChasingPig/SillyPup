@@ -2,7 +2,7 @@
 
 一只常驻 Windows 桌面的二次元 Q 版萌宠。透明置顶、可拖拽、会撒娇，后续还会陪你敲键盘、盯番茄钟。
 
-> 当前状态：**M0 骨架已完成**（窗口 / 托盘 / 拖拽跑通），互动、番茄钟、Focus Mode 尚未开始。
+> 当前状态：**M3 已完成**（番茄钟、结束气泡、睡眠校准），Focus Mode 尚未开始。
 
 ## 技术栈
 
@@ -33,7 +33,7 @@ npm rebuild electron koffi esbuild
 npm run dev
 ```
 
-启动后屏幕左上角会出现一个橙色圆形占位角色，可以拖拽（松手自动吸附在屏幕内），右下角托盘图标提供显示/隐藏、置顶开关和退出。
+启动后屏幕左上角会出现一个橙色圆形占位角色，可以拖拽（松手自动吸附在屏幕内），**右键角色**可开启番茄钟（默认时长或键盘输入 1~999 分钟），右下角托盘图标提供显示/隐藏、置顶开关和退出。
 
 > **首次安装排错**：若 `node_modules/electron/dist/electron.exe` 不存在，说明 Electron 二进制没下载成功。可手动下载 `https://npmmirror.com/mirrors/electron/<版本>/electron-v<版本>-win32-x64.zip`，解压到 `node_modules/electron/dist/`，再在该目录下写入 `path.txt`（内容 `electron.exe`）。详见下文「常见问题」。
 
@@ -55,15 +55,24 @@ SillyPup/
 │  │  ├─ index.ts            # 生命周期、单实例锁、IPC 注册
 │  │  ├─ window.ts           # 透明 / 无边框 / 置顶 / 不可聚焦窗口
 │  │  ├─ tray.ts             # 托盘菜单
-│  │  ├─ interaction.ts      # 光标轮询：穿透切换、点击判定、拖拽
-│  │  └─ hitMask.ts          # alpha 命中掩码存储与窗口内坐标查询
+│  │  ├─ interaction.ts      # 光标轮询：穿透切换、点击判定、拖拽、右键
+│  │  ├─ hitMask.ts          # alpha 命中掩码存储与窗口内坐标查询
+│  │  ├─ contextMenu.ts      # 右键菜单（原生 Menu.popup）
+│  │  ├─ pomodoro.ts         # 番茄钟计时（绝对时间戳 + 唤醒校准）
+│  │  ├─ bubble.ts           # 番茄钟结束气泡窗口
+│  │  ├─ prompt.ts           # 自定义时长输入窗口（1~999 分钟）
+│  │  └─ config.ts           # userData 配置读写
 │  ├─ preload/               # contextBridge 白名单 API
 │  ├─ renderer/              # 渲染层（React）
-│  │  ├─ index.html
+│  │  ├─ index.html          # 桌宠主页面
+│  │  ├─ bubble.html         # 气泡窗口页面
+│  │  ├─ prompt.html         # 自定义时长输入窗口页面
 │  │  └─ src/
 │  │     ├─ animation/       # 动画契约、帧播放器、占位帧源、clips.json
 │  │     ├─ fsm/             # 状态机与迁移表
 │  │     ├─ stage/           # Canvas 渲染循环
+│  │     ├─ bubble.tsx       # 气泡页面入口
+│  │     ├─ prompt.tsx       # 自定义时长页面入口
 │  │     └─ {main.tsx, App.tsx, index.css}
 │  └─ shared/                # 主进程与渲染层共用类型
 ├─ resources/icon.png        # 托盘占位图标
@@ -80,6 +89,8 @@ SillyPup/
 - **边界限制用 `workArea` 而非 `bounds`**：`workArea` 已排除任务栏，不会把桌宠藏到任务栏下面导致找不回。
 - **全局按键用轮询而非键盘钩子**：`WH_KEYBOARD_LL` 的行为特征与键盘记录器一致，容易触发杀软误报；按 30~60Hz 轮询 `GetAsyncKeyState` 足以满足「显示按键名」的需求，且不装钩子。
 - **命中判定用 alpha 掩码**：窗口常驻 `setIgnoreMouseEvents(true, { forward: true })`，渲染层每 120ms 上报 64×64 降采样掩码与角色包围盒，主进程在 60Hz 轮询中用掩码判断光标是否真的压在角色身上，命中才切回可交互。点角色响应、点空白穿透到下层程序，两者共用同一判定源。
+- **番茄钟只认绝对时间戳**：记录 `deadline = Date.now() + 时长`，每秒用 `deadline - Date.now()` 重算，而不是「每秒减一」。系统睡眠期间定时器不走，累加必然偏差；`powerMonitor.resume` 后立刻重算一次，睡眠中跨过 deadline 会直接判定完成。
+- **自定义时长用独立输入窗口**：桌宠窗口是 `focusable:false`，原生菜单在该窗口下既不能承载文本输入也不支持键盘操作。因此菜单项「自定义时长…」只负责唤起一个可聚焦的无边框小窗口，用户在窗口内键盘输入 1~999 分钟，确认后写入配置并开始计时。
 
 更完整的架构、状态机、素材管线与风险清单见 [技术方案](桌宠项目-技术方案.md)。
 
@@ -90,7 +101,7 @@ SillyPup/
 | M0 | 透明置顶窗口、托盘、单实例、拖拽与边界限制 | 已完成 |
 | M1 | 动画播放器 + 状态机（Idle/Action/Interact/Grabbed/Dragging/Dropped/Land） | 已完成 |
 | M2 | alpha 掩码命中判定、点击穿透切换、点击互动与冷却 | 已完成 |
-| M3 | 番茄钟、置顶气泡、睡眠唤醒计时校准 | 待开始 |
+| M3 | 番茄钟、置顶气泡、睡眠唤醒计时校准 | 已完成 |
 | M4 | Focus Mode、键盘气泡、鼠标垫映射跟随 | 待开始 |
 | M5 | 打包（NSIS）、开机自启、图标、日志 | 待开始 |
 | M6 | 正式素材替换、性能打磨 | 待开始 |

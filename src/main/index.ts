@@ -4,6 +4,11 @@ import { createPetWindow } from './window'
 import { createTray } from './tray'
 import { startInteraction } from './interaction'
 import { HitMaskStore } from './hitMask'
+import { PomodoroService } from './pomodoro'
+import { BubbleWindow } from './bubble'
+import { popupContextMenu } from './contextMenu'
+import { promptMinutes } from './prompt'
+import { loadConfig, saveConfig } from './config'
 import { IPC_CHANNELS } from '../shared/types'
 import type { HitMask, PetInputEvent } from '../shared/types'
 
@@ -16,30 +21,62 @@ if (!gotLock) {
   let win: BrowserWindow | null = null
   let tray: Electron.Tray | null = null
   let stopInteraction: (() => void) | null = null
+  let pomodoro: PomodoroService | null = null
 
   const maskStore = new HitMaskStore()
+  const bubble = new BubbleWindow()
+  const config = loadConfig()
 
   app.on('second-instance', () => {
     if (win && !win.isVisible()) win.show()
   })
 
   app.whenReady().then(() => {
-    win = createPetWindow()
-    tray = createTray(win)
+    const petWindow = createPetWindow()
+    win = petWindow
+    tray = createTray(petWindow)
 
-    const petWindow = win
-    stopInteraction = startInteraction(petWindow, maskStore, (e: PetInputEvent) => {
-      petWindow.webContents.send(IPC_CHANNELS.INPUT, e)
+    const service = new PomodoroService({
+      onTick: (remainMs, running) => {
+        petWindow.webContents.send(IPC_CHANNELS.POMODORO_TICK, { remainMs, running })
+      },
+      onDone: () => {
+        petWindow.webContents.send(IPC_CHANNELS.POMODORO_DONE)
+        bubble.show(petWindow, '时间到咯，休息两分钟吧')
+      }
     })
+    pomodoro = service
+
+    stopInteraction = startInteraction(
+      petWindow,
+      maskStore,
+      (e: PetInputEvent) => petWindow.webContents.send(IPC_CHANNELS.INPUT, e),
+      (local) => {
+        popupContextMenu(petWindow, local, {
+          defaultMinutes: config.pomodoroMinutes,
+          isRunning: () => service.running,
+          start: (minutes) => service.start(minutes),
+          stop: () => service.stop(),
+          promptCustom: () => {
+            void promptMinutes(petWindow, config.pomodoroMinutes).then((minutes) => {
+              if (minutes === null) return
+              config.pomodoroMinutes = minutes
+              saveConfig(config)
+              service.start(minutes)
+            })
+          }
+        })
+      }
+    )
 
     ipcMain.on(IPC_CHANNELS.MASK, (_event, mask: HitMask) => {
       maskStore.set(mask)
     })
 
     if (process.env['ELECTRON_RENDERER_URL']) {
-      win.loadURL(process.env['ELECTRON_RENDERER_URL'])
+      petWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
     } else {
-      win.loadFile(join(__dirname, '../renderer/index.html'))
+      petWindow.loadFile(join(__dirname, '../renderer/index.html'))
     }
   })
 
@@ -50,5 +87,7 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     stopInteraction?.()
+    pomodoro?.dispose()
+    bubble.dispose()
   })
 }

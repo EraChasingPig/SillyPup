@@ -1,0 +1,127 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  font-family: 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
+}
+
+.prompt-card {
+  width: 100%;
+  height: 100%;
+  padding: 18px 20px;
+  border-radius: 18px;
+  background: linear-gradient(165deg, #fffaf5 0%, #ffe9d6 100%);
+  border: 2px solid #ffb877;
+  box-shadow: 0 8px 22px rgba(180, 110, 40, 0.28);
+  display: flex;
+  flex-direction: column;
+}
+
+.prompt-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b4423;
+  margin-bottom: 12px;
+}
+
+.prompt-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.prompt-input {
+  flex: 1;
+  height: 36px;
+  padding: 0 12px;
+  font-size: 16px;
+  font-family: Consolas, monospace;
+  color: #6b4423;
+  background: #fffdfa;
+  border: 1px solid #f0c89a;
+  border-radius: 10px;
+  outline: none;
+}
+
+.prompt-input:focus {
+  border-color: #ff9f43;
+  box-shadow: 0 0 0 3px rgba(255, 159, 67, 0.18);
+}
+
+.prompt-input.has-error {
+  border-color: #e2725b;
+  box-shadow: 0 0 0 3px rgba(226, 114, 91, 0.16);
+}
+
+/* 去掉数字输入框的上下箭头，避免误触影响精度 */
+.prompt-input::-webkit-outer-spin-button,
+.prompt-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.prompt-unit {
+  font-size: 13px;
+  color: #9a7a5c;
+}
+
+.prompt-hint {
+  margin-top: 6px;
+  min-height: 16px;
+  font-size: 11px;
+  color: #a9907a;
+}
+
+.prompt-hint.is-error {
+  color: #d0543f;
+}
+
+.prompt-actions {
+  margin-top: auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.btn {
+  height: 32px;
+  padding: 0 18px;
+  font-size: 13px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: #f0c89a;
+  color: #8a6b4f;
+}
+
+.btn-ghost:hover {
+  background: rgba(255, 200, 150, 0.2);
+}
+
+.btn-primary {
+  background: #ff9f43;
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: #ff8c1a;
+}
