@@ -1,0 +1,44 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+.pet {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 8px;
+}
+
+.pet-body {
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  background: #ff9f43;
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.15);
+}
+
+.pet-label {
+  margin-top: 6px;
+  color: #666;
+  font-size: 12px;
+}
