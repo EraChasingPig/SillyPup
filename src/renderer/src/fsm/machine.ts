@@ -3,12 +3,23 @@ import type { PetEvent, PetMode, PetState } from '../../../shared/types'
 /** 各状态对应的动画 clip（与 clips.json 的 key 一一对应） */
 export const STATE_CLIP: Record<PetState, string> = {
   Idle: 'idle_breath',
-  Action: 'action_float',
-  Interact: 'interact_hop',
+  // Action / Interact 实际从日常动作池随机取，这里只作为兜底
+  Action: 'action_wag',
+  Interact: 'action_wag',
   Grabbed: 'grab_startle',
   Dragging: 'drag_kick',
   Dropped: 'dropped_fall',
   Land: 'land_bounce'
+}
+
+/** 日常动作池：待机超时与点击共用，随机挑一个播放 */
+export const DAILY_ACTION_CLIPS = ['action_wag', 'action_stretch', 'action_look', 'action_yawn']
+
+/** 随机挑一个日常动作，尽量不与上一个重复 */
+export function pickDailyAction(prev: string | null): string {
+  const pool = DAILY_ACTION_CLIPS.filter((id) => id !== prev)
+  const list = pool.length > 0 ? pool : DAILY_ACTION_CLIPS
+  return list[Math.floor(Math.random() * list.length)] ?? 'action_wag'
 }
 
 /** 交互结束后进入冷却，冷却期的 CLICK 直接丢弃（不重放、不重置） */
@@ -63,7 +74,8 @@ export class PetFSM {
 
       case 'CLICK': {
         if (now < this.cooldownUntil) return null
-        const busy: PetState[] = ['Interact', 'Grabbed', 'Dragging', 'Dropped', 'Land']
+        // 日常动作播放中忽略点击，避免 4 秒动作被半途打断后重新起播
+        const busy: PetState[] = ['Action', 'Interact', 'Grabbed', 'Dragging', 'Dropped', 'Land']
         return busy.includes(state) ? null : 'Interact'
       }
 
@@ -78,6 +90,7 @@ export class PetFSM {
             return 'Land'
           case 'Land':
           case 'Interact':
+          case 'Action':
             return 'Idle'
           default:
             return null

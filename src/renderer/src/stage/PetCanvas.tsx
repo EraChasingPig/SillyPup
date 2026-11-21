@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { spriteSource, CANVAS_SIZE } from '../animation/SpriteSource'
 import { AnimationPlayer } from '../animation/AnimationPlayer'
-import { PetFSM, STATE_CLIP } from '../fsm/machine'
+import { PetFSM, STATE_CLIP, pickDailyAction } from '../fsm/machine'
 import { drawFocusScene, mapToPad, padCenter, smoothHand } from './focusScene'
 import type { CursorPayload, PetState } from '../../../shared/types'
 
@@ -11,8 +11,6 @@ const MASK_RES = 64
 const MASK_INTERVAL_MS = 120
 /** Idle 静置多久后进入日常动作 */
 const IDLE_DWELL_MS = 12000
-/** 日常动作持续多久后回到 Idle */
-const ACTION_DWELL_MS = 8000
 /** 按键气泡显示时长（与 .stage-key 的动画时长一致） */
 const KEY_BUBBLE_MS = 900
 /** 敲键盘动作持续时长 */
@@ -68,10 +66,17 @@ export default function PetCanvas(): JSX.Element {
     })
 
     let stateEnteredAt = performance.now()
+    let lastActionClip: string | null = null
     const fsm = new PetFSM((_from, to) => {
       stateEnteredAt = performance.now()
       setState(to)
-      void player.play(STATE_CLIP[to])
+      // 待机超时与点击共用日常动作池，随机挑一个且不与上次重复
+      let clipId = STATE_CLIP[to]
+      if (to === 'Action' || to === 'Interact') {
+        clipId = pickDailyAction(lastActionClip)
+        lastActionClip = clipId
+      }
+      void player.play(clipId)
     })
     fsmInstance = fsm
 
@@ -150,13 +155,11 @@ export default function PetCanvas(): JSX.Element {
 
       reportMask(now)
 
-      // 日常行为：专注期间锁在 Action 不回落；否则静置太久换动作、动作做久了回 Idle
+      // 日常行为：专注期间锁在 Action 不回落；动作播完由 ANIM_END 回 Idle
       const dwell = now - stateEnteredAt
       if (pomodoroRunning.current) {
         if (fsm.current === 'Idle') fsm.send({ t: 'IDLE_TIMEOUT' })
       } else if (fsm.current === 'Idle' && dwell > IDLE_DWELL_MS) {
-        fsm.send({ t: 'IDLE_TIMEOUT' })
-      } else if (fsm.current === 'Action' && dwell > ACTION_DWELL_MS) {
         fsm.send({ t: 'IDLE_TIMEOUT' })
       }
 

@@ -6,18 +6,32 @@
     "interruptible": true,
     "anchor": { "x": 150, "y": 270 }
   },
-  "action_float": {
-    "fps": 8,
-    "loop": "loop",
-    "frameCount": 16,
+  "action_wag": {
+    "fps": 24,
+    "loop": "once",
+    "frameCount": 97,
     "interruptible": true,
     "anchor": { "x": 150, "y": 270 }
   },
-  "interact_hop": {
-    "fps": 16,
+  "action_stretch": {
+    "fps": 24,
     "loop": "once",
-    "frameCount": 8,
-    "interruptible": false,
+    "frameCount": 97,
+    "interruptible": true,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "action_look": {
+    "fps": 24,
+    "loop": "once",
+    "frameCount": 97,
+    "interruptible": true,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "action_yawn": {
+    "fps": 24,
+    "loop": "once",
+    "frameCount": 97,
+    "interruptible": true,
     "anchor": { "x": 150, "y": 270 }
   },
   "grab_startle": {
