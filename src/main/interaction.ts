@@ -1,5 +1,6 @@
 import { BrowserWindow, screen } from 'electron'
 import koffi from 'koffi'
+import { PET_BASE_SIZE } from '../shared/types'
 import type { PetInputEvent, Point, Size } from '../shared/types'
 import type { HitMaskStore } from './hitMask'
 
@@ -7,6 +8,16 @@ const VK_LBUTTON = 0x01
 const VK_RBUTTON = 0x02
 /** 5px 阈值区分短按点击与长按拖拽（技术方案 B4） */
 const DRAG_THRESHOLD = 5
+/** 右键沿左上-右下对角线移动超过该距离才进入缩放，避免误触 */
+const SCALE_THRESHOLD = 6
+
+/** 缩放控制：主进程负责改窗口大小，并把结果同步给渲染层 */
+export interface ScaleController {
+  get: () => number
+  begin: () => void
+  set: (scale: number) => void
+  commit: () => void
+}
 
 // 通过 user32.GetAsyncKeyState 检测鼠标按键（轮询方案，不装钩子）
 const user32 = koffi.load('user32.dll')
@@ -51,7 +62,8 @@ export function startInteraction(
   win: BrowserWindow,
   maskStore: HitMaskStore,
   onInput: (e: PetInputEvent) => void,
-  onContextMenu: (local: Point) => void
+  onContextMenu: (local: Point) => void,
+  scale: ScaleController
 ): () => void {
   let pressed = false
   let dragStarted = false
@@ -60,6 +72,12 @@ export function startInteraction(
   let prevDown = false
   let prevRightDown = false
   let ignoring = true
+
+  // 右键缩放状态
+  let rightPressed = false
+  let scaling = false
+  let rightPressPoint: Point = { x: 0, y: 0 }
+  let scaleStart = 1
 
   // 启动即穿透，等渲染层上报掩码后再按命中情况切换
   win.setIgnoreMouseEvents(true, { forward: true })
@@ -72,8 +90,8 @@ export function startInteraction(
     const local = { x: cursor.x - wx, y: cursor.y - wy }
     const hit = maskStore.hit(local.x, local.y)
 
-    // 拖拽期间必须保持可交互，否则窗口中途变穿透会丢 mouseup
-    const shouldIgnore = dragStarted ? false : !hit
+    // 拖拽/缩放期间必须保持可交互，否则窗口中途变穿透会丢 mouseup
+    const shouldIgnore = dragStarted || scaling ? false : !hit
     if (shouldIgnore !== ignoring) {
       ignoring = shouldIgnore
       win.setIgnoreMouseEvents(ignoring, { forward: true })
@@ -82,10 +100,39 @@ export function startInteraction(
     const pressEdge = down && !prevDown
     const releaseEdge = !down && prevDown
 
-    // 右键只在「按下沿 + 命中角色」时弹菜单，避免拖拽过程中误弹
     const rightDown = isRightButtonDown()
+
+    // 右键：按下时先记录起点，拖动沿对角线缩放，松开时若没缩放才弹菜单
     if (rightDown && !prevRightDown && hit) {
-      onContextMenu(local)
+      rightPressed = true
+      scaling = false
+      rightPressPoint = cursor
+      scaleStart = scale.get()
+    }
+
+    if (rightDown && rightPressed) {
+      const dx = cursor.x - rightPressPoint.x
+      const dy = cursor.y - rightPressPoint.y
+      // 只取沿 (1,1) 对角线的投影：左上为负（缩小），右下为正（放大）
+      const diagonal = (dx + dy) / 2
+
+      if (!scaling && Math.abs(diagonal) >= SCALE_THRESHOLD) {
+        scaling = true
+        scale.begin()
+      }
+      if (scaling) {
+        scale.set(scaleStart + diagonal / PET_BASE_SIZE)
+      }
+    }
+
+    if (!rightDown && prevRightDown && rightPressed) {
+      if (scaling) {
+        scale.commit()
+      } else {
+        onContextMenu(local)
+      }
+      rightPressed = false
+      scaling = false
     }
     prevRightDown = rightDown
 

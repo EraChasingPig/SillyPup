@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
-import { createPetWindow } from './window'
+import { createPetWindow, applyPetScale } from './window'
 import { createTray } from './tray'
 import { startInteraction } from './interaction'
 import { HitMaskStore } from './hitMask'
@@ -31,6 +31,7 @@ if (!gotLock) {
   let stopKeyPoller: (() => void) | null = null
   let stopCursorPoller: (() => void) | null = null
   let pomodoro: PomodoroService | null = null
+  let scaleAnchor: { x: number; y: number } | null = null
 
   const maskStore = new HitMaskStore()
   const bubble = new BubbleWindow()
@@ -48,7 +49,7 @@ if (!gotLock) {
     applyAutoLaunch(config.autoLaunch)
     logInfo(`app ready, userData=${app.getPath('userData')}`)
 
-    const petWindow = createPetWindow()
+    const petWindow = createPetWindow(config.scale)
     win = petWindow
     tray = createTray(petWindow, config)
 
@@ -70,6 +71,9 @@ if (!gotLock) {
     }
     const broadcastFocusState = (): void => {
       petWindow.webContents.send(IPC_CHANNELS.FOCUS_STATE, focusState)
+    }
+    const broadcastScale = (): void => {
+      petWindow.webContents.send(IPC_CHANNELS.SCALE, config.scale)
     }
 
     const keyPoller = startKeyPoller((label) => {
@@ -120,11 +124,31 @@ if (!gotLock) {
             broadcastFocusState()
           }
         })
+      },
+      {
+        get: () => config.scale,
+        begin: () => {
+          const b = petWindow.getBounds()
+          scaleAnchor = { x: b.x + b.width / 2, y: b.y + b.height }
+        },
+        set: (s) => {
+          const applied = applyPetScale(petWindow, s, scaleAnchor ?? undefined)
+          if (applied === config.scale) return
+          config.scale = applied
+          broadcastScale()
+        },
+        commit: () => {
+          saveConfig(config)
+          scaleAnchor = null
+        }
       }
     )
 
-    // 渲染层每次加载完成后同步一次开关状态，保证刷新/重载后不错位
-    petWindow.webContents.on('did-finish-load', broadcastFocusState)
+    // 渲染层每次加载完成后同步一次状态，保证刷新/重载后不错位
+    petWindow.webContents.on('did-finish-load', () => {
+      broadcastFocusState()
+      broadcastScale()
+    })
 
     ipcMain.on(IPC_CHANNELS.MASK, (_event, mask: HitMask) => {
       maskStore.set(mask)

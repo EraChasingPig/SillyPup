@@ -10,6 +10,12 @@ export interface Size {
   height: number
 }
 
+/** 桌宠基准窗口尺寸（缩放比例为 1 时） */
+export const PET_BASE_SIZE = 300
+/** 桌宠缩放范围：0.6 ~ 1.6 倍 */
+export const PET_SCALE_MIN = 0.6
+export const PET_SCALE_MAX = 1.6
+
 // 桌宠模式：normal 为日常形态，focus 为「敲键盘」形态
 export type PetMode = 'normal' | 'focus'
 
@@ -71,7 +77,9 @@ export const IPC_CHANNELS = {
   /** 主进程 → 渲染层：全局按键（用于气泡显示） */
   KEY_EVENT: 'pet:key',
   /** 主进程 → 渲染层：全局光标位置（用于鼠标垫映射） */
-  CURSOR: 'pet:cursor'
+  CURSOR: 'pet:cursor',
+  /** 主进程 → 渲染层：桌宠缩放比例 */
+  SCALE: 'pet:scale'
 } as const
 
 export interface PomodoroTick {

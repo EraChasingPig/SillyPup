@@ -1,8 +1,8 @@
 {
   "idle_breath": {
-    "fps": 8,
+    "fps": 19.2,
     "loop": "loop",
-    "frameCount": 12,
+    "frameCount": 43,
     "interruptible": true,
     "anchor": { "x": 150, "y": 270 }
   },

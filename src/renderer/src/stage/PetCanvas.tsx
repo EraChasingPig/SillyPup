@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { placeholderSource, CANVAS_SIZE } from '../animation/PlaceholderSource'
+import { spriteSource, CANVAS_SIZE } from '../animation/SpriteSource'
 import { AnimationPlayer } from '../animation/AnimationPlayer'
 import { PetFSM, STATE_CLIP } from '../fsm/machine'
 import { drawFocusScene, mapToPad, padCenter, smoothHand } from './focusScene'
@@ -34,6 +34,7 @@ export default function PetCanvas(): JSX.Element {
   const [state, setState] = useState<PetState>('Idle')
   const [remainMs, setRemainMs] = useState(0)
   const [focusMode, setFocusMode] = useState(false)
+  const [scale, setScale] = useState(1)
   const [keyLabel, setKeyLabel] = useState<{ label: string; seq: number } | null>(null)
   const pomodoroRunning = useRef(false)
 
@@ -41,6 +42,7 @@ export default function PetCanvas(): JSX.Element {
   const focusModeRef = useRef(false)
   const keyBubbleRef = useRef(true)
   const cursorRef = useRef<CursorPayload | null>(null)
+  const scaleRef = useRef(1)
   const handRef = useRef(padCenter())
   const typingUntilRef = useRef(0)
   const keySeqRef = useRef(0)
@@ -61,7 +63,7 @@ export default function PetCanvas(): JSX.Element {
 
     let fsmInstance: PetFSM | null = null
 
-    const player = new AnimationPlayer(placeholderSource, (clipId) => {
+    const player = new AnimationPlayer(spriteSource, (clipId) => {
       fsmInstance?.send({ t: 'ANIM_END', clipId })
     })
 
@@ -75,14 +77,15 @@ export default function PetCanvas(): JSX.Element {
 
     void player.play(STATE_CLIP[fsm.current])
 
-    const { width: W, height: H } = CANVAS_SIZE
-
     // ---- 命中掩码上报 ----
     let lastMaskAt = 0
     const reportMask = (now: number): void => {
       if (now - lastMaskAt < MASK_INTERVAL_MS) return
       lastMaskAt = now
 
+      // 画布会随缩放变大，掩码与包围盒都按窗口实际像素计算
+      const W = canvas.width
+      const H = canvas.height
       const data = ctx.getImageData(0, 0, W, H).data
       const cells = new Uint8Array(MASK_RES * MASK_RES)
       const cellW = W / MASK_RES
@@ -125,7 +128,11 @@ export default function PetCanvas(): JSX.Element {
 
       player.update(dt)
 
-      ctx.clearRect(0, 0, W, H)
+      const s = scaleRef.current
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      // 素材按 300×300 设计，缩放时整体放大绘制，遮罩坐标与窗口保持一致
+      ctx.setTransform(s, 0, 0, s, 0, 0)
       if (focusModeRef.current) {
         // Focus 模式：手部向鼠标垫目标点做帧率无关平滑，边缘由 mapToPad 内缩限位
         const cursor = cursorRef.current
@@ -191,6 +198,11 @@ export default function PetCanvas(): JSX.Element {
       cursorRef.current = p
     })
 
+    const offScale = window.api.onScale((s) => {
+      scaleRef.current = s
+      setScale(s)
+    })
+
     return () => {
       offInput()
       offTick()
@@ -198,8 +210,9 @@ export default function PetCanvas(): JSX.Element {
       offFocus()
       offKey()
       offCursor()
+      offScale()
       cancelAnimationFrame(raf)
-      placeholderSource.dispose()
+      spriteSource.dispose()
     }
   }, [])
 
@@ -207,8 +220,8 @@ export default function PetCanvas(): JSX.Element {
     <div className="stage">
       <canvas
         ref={canvasRef}
-        width={CANVAS_SIZE.width}
-        height={CANVAS_SIZE.height}
+        width={Math.round(CANVAS_SIZE.width * scale)}
+        height={Math.round(CANVAS_SIZE.height * scale)}
         className="stage-canvas"
       />
       <div className="stage-debug">{focusMode ? `Focus · ${state}` : state}</div>

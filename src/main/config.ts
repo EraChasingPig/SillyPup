@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
+import { PET_SCALE_MAX, PET_SCALE_MIN } from '../shared/types'
 
 export interface AppConfig {
   /** 番茄钟默认时长（分钟） */
@@ -11,16 +12,24 @@ export interface AppConfig {
   keyBubble: boolean
   /** 开机自启（写入 HKCU\...\Run） */
   autoLaunch: boolean
+  /** 桌宠缩放比例（1 为基准尺寸） */
+  scale: number
 }
 
 const DEFAULTS: AppConfig = {
   pomodoroMinutes: 25,
   focusMode: false,
   keyBubble: true,
-  autoLaunch: false
+  autoLaunch: false,
+  scale: 1
 }
 
 let cache: AppConfig | null = null
+
+function clampScale(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return DEFAULTS.scale
+  return Math.min(Math.max(v, PET_SCALE_MIN), PET_SCALE_MAX)
+}
 
 /**
  * 用户配置放在 userData，与随 asar 打包的动画资源分开（技术方案 3.2）。
@@ -43,7 +52,8 @@ export function loadConfig(): AppConfig {
             : DEFAULTS.pomodoroMinutes,
         focusMode: typeof raw.focusMode === 'boolean' ? raw.focusMode : DEFAULTS.focusMode,
         keyBubble: typeof raw.keyBubble === 'boolean' ? raw.keyBubble : DEFAULTS.keyBubble,
-        autoLaunch: typeof raw.autoLaunch === 'boolean' ? raw.autoLaunch : DEFAULTS.autoLaunch
+        autoLaunch: typeof raw.autoLaunch === 'boolean' ? raw.autoLaunch : DEFAULTS.autoLaunch,
+        scale: clampScale(raw.scale)
       }
       return cache
     }

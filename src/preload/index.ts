@@ -83,6 +83,15 @@ const api = {
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.CURSOR, handler)
     }
+  },
+
+  /** 主进程 → 渲染层：桌宠缩放比例 */
+  onScale: (cb: (scale: number) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, scale: number): void => cb(scale)
+    ipcRenderer.on(IPC_CHANNELS.SCALE, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.SCALE, handler)
+    }
   }
 }
 
