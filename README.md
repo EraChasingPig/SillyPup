@@ -59,7 +59,11 @@ SillyPup/
 │  ├─ preload/               # contextBridge 白名单 API
 │  ├─ renderer/              # 渲染层（React）
 │  │  ├─ index.html
-│  │  └─ src/{main.tsx, App.tsx, index.css}
+│  │  └─ src/
+│  │     ├─ animation/       # 动画契约、帧播放器、占位帧源、clips.json
+│  │     ├─ fsm/             # 状态机与迁移表
+│  │     ├─ stage/           # Canvas 渲染循环
+│  │     └─ {main.tsx, App.tsx, index.css}
 │  └─ shared/                # 主进程与渲染层共用类型
 ├─ resources/icon.png        # 托盘占位图标
 ├─ electron.vite.config.ts
@@ -82,7 +86,7 @@ SillyPup/
 | 里程碑 | 内容 | 状态 |
 | --- | --- | --- |
 | M0 | 透明置顶窗口、托盘、单实例、拖拽与边界限制 | 已完成 |
-| M1 | 动画播放器 + 状态机（Idle/Action/Interact/Grabbed/Dragging/Dropped/Land） | 待开始 |
+| M1 | 动画播放器 + 状态机（Idle/Action/Interact/Grabbed/Dragging/Dropped/Land） | 已完成 |
 | M2 | alpha 掩码命中判定、点击穿透切换、点击互动与冷却 | 待开始 |
 | M3 | 番茄钟、置顶气泡、睡眠唤醒计时校准 | 待开始 |
 | M4 | Focus Mode、键盘气泡、鼠标垫映射跟随 | 待开始 |

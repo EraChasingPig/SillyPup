@@ -19,26 +19,25 @@ body {
   cursor: default;
 }
 
-.pet {
+.stage {
+  position: relative;
   width: 100%;
   height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  padding-bottom: 8px;
 }
 
-.pet-body {
-  width: 150px;
-  height: 150px;
-  border-radius: 50%;
-  background: #ff9f43;
-  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.15);
+.stage-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
-.pet-label {
-  margin-top: 6px;
-  color: #666;
-  font-size: 12px;
+/* 开发期状态标签，接入真实素材后可移除 */
+.stage-debug {
+  position: absolute;
+  top: 6px;
+  left: 10px;
+  font-size: 11px;
+  font-family: Consolas, monospace;
+  color: #9a7a5c;
+  pointer-events: none;
 }

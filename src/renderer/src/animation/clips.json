@@ -1,0 +1,51 @@
+{
+  "idle_breath": {
+    "fps": 8,
+    "loop": "loop",
+    "frameCount": 12,
+    "interruptible": true,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "action_float": {
+    "fps": 8,
+    "loop": "loop",
+    "frameCount": 16,
+    "interruptible": true,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "interact_hop": {
+    "fps": 16,
+    "loop": "once",
+    "frameCount": 8,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "grab_startle": {
+    "fps": 18,
+    "loop": "once",
+    "frameCount": 6,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "drag_kick": {
+    "fps": 14,
+    "loop": "loop",
+    "frameCount": 8,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "dropped_fall": {
+    "fps": 20,
+    "loop": "once",
+    "frameCount": 6,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "land_bounce": {
+    "fps": 18,
+    "loop": "once",
+    "frameCount": 8,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  }
+}
