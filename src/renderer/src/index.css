@@ -57,3 +57,42 @@ body {
   pointer-events: none;
   text-shadow: 0 1px 3px rgba(255, 255, 255, 0.8);
 }
+
+/* 全局按键气泡：放右上角，避开番茄钟倒计时与角色头部 */
+.stage-key {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  min-width: 46px;
+  padding: 6px 14px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fffaf5, #ffe9d6);
+  border: 2px solid #ffb877;
+  color: #7a4a1e;
+  font-size: 18px;
+  font-weight: 700;
+  font-family: Consolas, 'Microsoft YaHei', monospace;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 4px 10px rgba(180, 110, 50, 0.25);
+  animation: key-pop 0.9s ease-out forwards;
+}
+
+@keyframes key-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.8);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.95);
+  }
+}

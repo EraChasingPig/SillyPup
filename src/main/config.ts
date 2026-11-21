@@ -5,10 +5,16 @@ import { join } from 'path'
 export interface AppConfig {
   /** 番茄钟默认时长（分钟） */
   pomodoroMinutes: number
+  /** Focus 模式：小笨狗坐书桌前敲键盘的形象 */
+  focusMode: boolean
+  /** 全局按键气泡开关 */
+  keyBubble: boolean
 }
 
 const DEFAULTS: AppConfig = {
-  pomodoroMinutes: 25
+  pomodoroMinutes: 25,
+  focusMode: false,
+  keyBubble: true
 }
 
 let cache: AppConfig | null = null
@@ -31,7 +37,9 @@ export function loadConfig(): AppConfig {
         pomodoroMinutes:
           typeof raw.pomodoroMinutes === 'number' && raw.pomodoroMinutes > 0
             ? raw.pomodoroMinutes
-            : DEFAULTS.pomodoroMinutes
+            : DEFAULTS.pomodoroMinutes,
+        focusMode: typeof raw.focusMode === 'boolean' ? raw.focusMode : DEFAULTS.focusMode,
+        keyBubble: typeof raw.keyBubble === 'boolean' ? raw.keyBubble : DEFAULTS.keyBubble
       }
       return cache
     }

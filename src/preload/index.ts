@@ -1,6 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS } from '../shared/types'
-import type { HitMask, PetInputEvent, PomodoroTick } from '../shared/types'
+import type {
+  CursorPayload,
+  FocusState,
+  HitMask,
+  KeyEventPayload,
+  PetInputEvent,
+  PomodoroTick
+} from '../shared/types'
 
 const api = {
   platform: process.platform,
@@ -49,6 +56,33 @@ const api = {
   /** 自定义时长窗口：取消 */
   cancelPrompt: (): void => {
     ipcRenderer.send(IPC_CHANNELS.PROMPT_CANCEL)
+  },
+
+  /** 主进程 → 渲染层：Focus 模式与按键气泡开关 */
+  onFocusState: (cb: (s: FocusState) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, payload: FocusState): void => cb(payload)
+    ipcRenderer.on(IPC_CHANNELS.FOCUS_STATE, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.FOCUS_STATE, handler)
+    }
+  },
+
+  /** 主进程 → 渲染层：全局按键 */
+  onKeyEvent: (cb: (e: KeyEventPayload) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, payload: KeyEventPayload): void => cb(payload)
+    ipcRenderer.on(IPC_CHANNELS.KEY_EVENT, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.KEY_EVENT, handler)
+    }
+  },
+
+  /** 主进程 → 渲染层：全局光标位置（Focus 模式鼠标垫映射） */
+  onCursor: (cb: (p: CursorPayload) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, payload: CursorPayload): void => cb(payload)
+    ipcRenderer.on(IPC_CHANNELS.CURSOR, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.CURSOR, handler)
+    }
   }
 }
 

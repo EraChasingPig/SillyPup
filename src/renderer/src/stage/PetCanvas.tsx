@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { placeholderSource, CANVAS_SIZE } from '../animation/PlaceholderSource'
 import { AnimationPlayer } from '../animation/AnimationPlayer'
 import { PetFSM, STATE_CLIP } from '../fsm/machine'
-import type { PetState } from '../../../shared/types'
+import { drawFocusScene, mapToPad, padCenter, smoothHand } from './focusScene'
+import type { CursorPayload, PetState } from '../../../shared/types'
 
 /** 掩码降采样分辨率：64×64 足够判断光标是否压在身上 */
 const MASK_RES = 64
@@ -12,6 +13,10 @@ const MASK_INTERVAL_MS = 120
 const IDLE_DWELL_MS = 12000
 /** 日常动作持续多久后回到 Idle */
 const ACTION_DWELL_MS = 8000
+/** 按键气泡显示时长（与 .stage-key 的动画时长一致） */
+const KEY_BUBBLE_MS = 900
+/** 敲键盘动作持续时长 */
+const TYPING_MS = 260
 
 function formatRemain(ms: number): string {
   const total = Math.ceil(ms / 1000)
@@ -22,13 +27,30 @@ function formatRemain(ms: number): string {
 
 /**
  * 舞台组件：渲染循环 + 动画播放 + 状态机串联 + 命中掩码上报。
- * 鼠标输入由主进程的 interaction 控制器判定后，经 IPC 送回这里驱动状态机。
+ * Focus 模式下改为绘制「书桌 + 键盘 + 鼠标垫」场景，手部跟随全局光标。
  */
 export default function PetCanvas(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [state, setState] = useState<PetState>('Idle')
   const [remainMs, setRemainMs] = useState(0)
+  const [focusMode, setFocusMode] = useState(false)
+  const [keyLabel, setKeyLabel] = useState<{ label: string; seq: number } | null>(null)
   const pomodoroRunning = useRef(false)
+
+  // 渲染循环里高频读取的状态放 ref，避免闭包捕获旧值
+  const focusModeRef = useRef(false)
+  const keyBubbleRef = useRef(true)
+  const cursorRef = useRef<CursorPayload | null>(null)
+  const handRef = useRef(padCenter())
+  const typingUntilRef = useRef(0)
+  const keySeqRef = useRef(0)
+
+  // 气泡到点自动消失
+  useEffect(() => {
+    if (!keyLabel) return
+    const timer = setTimeout(() => setKeyLabel(null), KEY_BUBBLE_MS)
+    return () => clearTimeout(timer)
+  }, [keyLabel])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -104,8 +126,20 @@ export default function PetCanvas(): JSX.Element {
       player.update(dt)
 
       ctx.clearRect(0, 0, W, H)
-      const frame = player.currentFrame
-      if (frame) ctx.drawImage(frame, 0, 0)
+      if (focusModeRef.current) {
+        // Focus 模式：手部向鼠标垫目标点做帧率无关平滑，边缘由 mapToPad 内缩限位
+        const cursor = cursorRef.current
+        const target = cursor ? mapToPad(cursor) : padCenter()
+        handRef.current = smoothHand(handRef.current, target, dt)
+        drawFocusScene(ctx, {
+          time: now,
+          hand: handRef.current,
+          typingUntil: typingUntilRef.current
+        })
+      } else {
+        const frame = player.currentFrame
+        if (frame) ctx.drawImage(frame, 0, 0)
+      }
 
       reportMask(now)
 
@@ -139,10 +173,31 @@ export default function PetCanvas(): JSX.Element {
       setRemainMs(0)
     })
 
+    // ---- Focus 模式 / 按键气泡 / 光标 ----
+    const offFocus = window.api.onFocusState((s) => {
+      focusModeRef.current = s.focusMode
+      keyBubbleRef.current = s.keyBubble
+      setFocusMode(s.focusMode)
+    })
+
+    const offKey = window.api.onKeyEvent((e) => {
+      if (!keyBubbleRef.current) return
+      typingUntilRef.current = performance.now() + TYPING_MS
+      keySeqRef.current += 1
+      setKeyLabel({ label: e.label, seq: keySeqRef.current })
+    })
+
+    const offCursor = window.api.onCursor((p) => {
+      cursorRef.current = p
+    })
+
     return () => {
       offInput()
       offTick()
       offDone()
+      offFocus()
+      offKey()
+      offCursor()
       cancelAnimationFrame(raf)
       placeholderSource.dispose()
     }
@@ -156,8 +211,13 @@ export default function PetCanvas(): JSX.Element {
         height={CANVAS_SIZE.height}
         className="stage-canvas"
       />
-      <div className="stage-debug">{state}</div>
+      <div className="stage-debug">{focusMode ? `Focus · ${state}` : state}</div>
       {remainMs > 0 && <div className="stage-timer">{formatRemain(remainMs)}</div>}
+      {keyLabel && (
+        <div key={keyLabel.seq} className="stage-key">
+          {keyLabel.label}
+        </div>
+      )}
     </div>
   )
 }

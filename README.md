@@ -2,7 +2,7 @@
 
 一只常驻 Windows 桌面的二次元 Q 版萌宠。透明置顶、可拖拽、会撒娇，后续还会陪你敲键盘、盯番茄钟。
 
-> 当前状态：**M3 已完成**（番茄钟、结束气泡、睡眠校准），Focus Mode 尚未开始。
+> 当前状态：**M4 已完成**（Focus 模式、全局按键气泡、鼠标垫映射跟随），下一步进入打包与打磨。
 
 ## 技术栈
 
@@ -33,7 +33,9 @@ npm rebuild electron koffi esbuild
 npm run dev
 ```
 
-启动后屏幕左上角会出现一个橙色圆形占位角色，可以拖拽（松手自动吸附在屏幕内），**右键角色**可开启番茄钟（默认时长或键盘输入 1~999 分钟），右下角托盘图标提供显示/隐藏、置顶开关和退出。
+启动后屏幕左上角会出现一个橙色圆形占位角色，可以拖拽（松手自动吸附在屏幕内），**右键角色**可开启番茄钟（默认时长或键盘输入 1~999 分钟）、切换 Focus 模式与按键气泡；右下角托盘图标提供显示/隐藏、置顶开关和退出。
+
+Focus 模式下角色会变成「坐在书桌前敲键盘」的样子，右手会跟随你的鼠标在鼠标垫上移动；敲键盘时右上角会短暂显示按键名。
 
 > **首次安装排错**：若 `node_modules/electron/dist/electron.exe` 不存在，说明 Electron 二进制没下载成功。可手动下载 `https://npmmirror.com/mirrors/electron/<版本>/electron-v<版本>-win32-x64.zip`，解压到 `node_modules/electron/dist/`，再在该目录下写入 `path.txt`（内容 `electron.exe`）。详见下文「常见问题」。
 
@@ -61,6 +63,8 @@ SillyPup/
 │  │  ├─ pomodoro.ts         # 番茄钟计时（绝对时间戳 + 唤醒校准）
 │  │  ├─ bubble.ts           # 番茄钟结束气泡窗口
 │  │  ├─ prompt.ts           # 自定义时长输入窗口（1~999 分钟）
+│  │  ├─ keyPoller.ts        # 全局按键轮询（差集去重 + 限流）
+│  │  ├─ cursorPoller.ts     # 全局光标轮询（Focus 模式鼠标垫映射用）
 │  │  └─ config.ts           # userData 配置读写
 │  ├─ preload/               # contextBridge 白名单 API
 │  ├─ renderer/              # 渲染层（React）
@@ -70,7 +74,7 @@ SillyPup/
 │  │  └─ src/
 │  │     ├─ animation/       # 动画契约、帧播放器、占位帧源、clips.json
 │  │     ├─ fsm/             # 状态机与迁移表
-│  │     ├─ stage/           # Canvas 渲染循环
+│  │     ├─ stage/           # Canvas 渲染循环 + Focus 场景
 │  │     ├─ bubble.tsx       # 气泡页面入口
 │  │     ├─ prompt.tsx       # 自定义时长页面入口
 │  │     └─ {main.tsx, App.tsx, index.css}
@@ -87,7 +91,9 @@ SillyPup/
 - **拖拽不用 `-webkit-app-region: drag`**：该系统能力会吞掉 `mousedown/mousemove`，导致「点击」与「拖拽」的位移阈值判定失效。改为主进程 60Hz 轮询 `screen.getCursorScreenPoint()` + `koffi` 读取左键状态，再用 `setPosition` 移动窗口。
 - **坐标一律使用 DIP**：`screen.getCursorScreenPoint()` 与 `display.workArea` 返回的都是 DIP，混用物理像素会在 125%/150% 缩放下产生拖拽漂移。
 - **边界限制用 `workArea` 而非 `bounds`**：`workArea` 已排除任务栏，不会把桌宠藏到任务栏下面导致找不回。
-- **全局按键用轮询而非键盘钩子**：`WH_KEYBOARD_LL` 的行为特征与键盘记录器一致，容易触发杀软误报；按 30~60Hz 轮询 `GetAsyncKeyState` 足以满足「显示按键名」的需求，且不装钩子。
+- **全局按键用轮询而非键盘钩子**：`WH_KEYBOARD_LL` 的行为特征与键盘记录器一致，容易触发杀软误报；按 50Hz 轮询 `GetAsyncKeyState` 足以满足「显示按键名」的需求，且不装钩子。用上一帧按下集合做差集，长按不会重复上报；两次气泡至少间隔 40ms，连打不刷屏；自定义时长窗口输入期间暂停轮询，避免把自己的输入弹成气泡。
+- **鼠标垫映射**：全局光标先按所在显示器 `workArea` 归一化到 0~1，再映射到鼠标垫内缩后的矩形，天然实现「手不越出垫子」的边缘限位；手部位移用 `1 - exp(-dt/90)` 做帧率无关平滑，60Hz 与 165Hz 手感一致。
+- **Focus 模式与状态机正交**：`mode` 只是渲染层的形象开关，切换不产生状态迁移，拖拽/点击等状态逻辑在两种形态下完全共用。
 - **命中判定用 alpha 掩码**：窗口常驻 `setIgnoreMouseEvents(true, { forward: true })`，渲染层每 120ms 上报 64×64 降采样掩码与角色包围盒，主进程在 60Hz 轮询中用掩码判断光标是否真的压在角色身上，命中才切回可交互。点角色响应、点空白穿透到下层程序，两者共用同一判定源。
 - **番茄钟只认绝对时间戳**：记录 `deadline = Date.now() + 时长`，每秒用 `deadline - Date.now()` 重算，而不是「每秒减一」。系统睡眠期间定时器不走，累加必然偏差；`powerMonitor.resume` 后立刻重算一次，睡眠中跨过 deadline 会直接判定完成。
 - **自定义时长用独立输入窗口**：桌宠窗口是 `focusable:false`，原生菜单在该窗口下既不能承载文本输入也不支持键盘操作。因此菜单项「自定义时长…」只负责唤起一个可聚焦的无边框小窗口，用户在窗口内键盘输入 1~999 分钟，确认后写入配置并开始计时。
@@ -102,7 +108,7 @@ SillyPup/
 | M1 | 动画播放器 + 状态机（Idle/Action/Interact/Grabbed/Dragging/Dropped/Land） | 已完成 |
 | M2 | alpha 掩码命中判定、点击穿透切换、点击互动与冷却 | 已完成 |
 | M3 | 番茄钟、置顶气泡、睡眠唤醒计时校准 | 已完成 |
-| M4 | Focus Mode、键盘气泡、鼠标垫映射跟随 | 待开始 |
+| M4 | Focus Mode、键盘气泡、鼠标垫映射跟随 | 已完成 |
 | M5 | 打包（NSIS）、开机自启、图标、日志 | 待开始 |
 | M6 | 正式素材替换、性能打磨 | 待开始 |
 

@@ -65,7 +65,13 @@ export const IPC_CHANNELS = {
   /** 自定义时长输入窗口：确认 */
   PROMPT_SUBMIT: 'prompt:submit',
   /** 自定义时长输入窗口：取消 */
-  PROMPT_CANCEL: 'prompt:cancel'
+  PROMPT_CANCEL: 'prompt:cancel',
+  /** 主进程 → 渲染层：Focus 模式与按键气泡开关状态 */
+  FOCUS_STATE: 'pet:focus-state',
+  /** 主进程 → 渲染层：全局按键（用于气泡显示） */
+  KEY_EVENT: 'pet:key',
+  /** 主进程 → 渲染层：全局光标位置（用于鼠标垫映射） */
+  CURSOR: 'pet:cursor'
 } as const
 
 export interface PomodoroTick {
@@ -76,4 +82,22 @@ export interface PomodoroTick {
 /** 自定义时长的合法范围（分钟） */
 export const POMODORO_MIN_MINUTES = 1
 export const POMODORO_MAX_MINUTES = 999
+
+/** Focus 模式的开关集合，由主进程在启动与菜单切换时下发 */
+export interface FocusState {
+  focusMode: boolean
+  keyBubble: boolean
+}
+
+/** 一次轮询里检测到的新按键（已去重、已限流） */
+export interface KeyEventPayload {
+  label: string
+}
+
+/** 全局光标位置与所在显示器的可用区域（均为 DIP） */
+export interface CursorPayload {
+  x: number
+  y: number
+  workArea: Rect
+}
 

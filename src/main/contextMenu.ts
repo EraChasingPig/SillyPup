@@ -9,6 +9,12 @@ export interface ContextMenuDeps {
   stop: () => void
   /** 打开键盘输入窗口，自定义 1~999 分钟的时长 */
   promptCustom: () => void
+  /** 当前 Focus 模式开关状态 */
+  focusMode: boolean
+  /** 当前按键气泡开关状态 */
+  keyBubble: boolean
+  setFocusMode: (on: boolean) => void
+  setKeyBubble: (on: boolean) => void
 }
 
 /**
@@ -39,7 +45,18 @@ export function popupContextMenu(
       click: () => deps.stop()
     },
     { type: 'separator' },
-    { label: 'Focus 模式（M4 开发中）', enabled: false },
+    {
+      label: 'Focus 模式',
+      type: 'checkbox',
+      checked: deps.focusMode,
+      click: (item: Electron.MenuItem) => deps.setFocusMode(item.checked)
+    },
+    {
+      label: '按键气泡',
+      type: 'checkbox',
+      checked: deps.keyBubble,
+      click: (item: Electron.MenuItem) => deps.setKeyBubble(item.checked)
+    },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() }
   ]
