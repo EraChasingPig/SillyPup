@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
-import { createPetWindow, applyPetScale } from './window'
+import { createPetWindow, applyPetScale, startTopmostWatchdog } from './window'
 import { createTray } from './tray'
 import { startInteraction } from './interaction'
 import { HitMaskStore } from './hitMask'
@@ -16,6 +16,16 @@ import { applyAutoLaunch } from './autoLaunch'
 import { IPC_CHANNELS } from '../shared/types'
 import type { FocusState, HitMask, PetInputEvent } from '../shared/types'
 
+// Windows 下 Chromium 的窗口遮挡检测会把被其他窗口盖住的窗口判为“被遮挡”并停止合成。
+// 桌宠是透明置顶小窗，遮挡它的窗口关闭后合成不会自动恢复，表现为整只狗从屏幕上消失，
+// 只有重新设置一次置顶才会重绘。桌宠体积小且必须常驻可见，直接关闭遮挡检测与遮挡后降级。
+const disabledFeatures = app.commandLine.getSwitchValue('disable-features')
+app.commandLine.appendSwitch(
+  'disable-features',
+  disabledFeatures ? `${disabledFeatures},CalculateNativeWinOcclusion` : 'CalculateNativeWinOcclusion'
+)
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
+
 // 日志最早就绪，后续启动失败也能留下线索
 setupLogger()
 
@@ -30,6 +40,7 @@ if (!gotLock) {
   let stopInteraction: (() => void) | null = null
   let stopKeyPoller: (() => void) | null = null
   let stopCursorPoller: (() => void) | null = null
+  let stopTopmostWatchdog: (() => void) | null = null
   let pomodoro: PomodoroService | null = null
   let scaleAnchor: { x: number; y: number } | null = null
 
@@ -51,6 +62,7 @@ if (!gotLock) {
 
     const petWindow = createPetWindow(config.scale)
     win = petWindow
+    stopTopmostWatchdog = startTopmostWatchdog(petWindow)
     tray = createTray(petWindow, config)
 
     const service = new PomodoroService({
@@ -171,6 +183,7 @@ if (!gotLock) {
     stopInteraction?.()
     stopKeyPoller?.()
     stopCursorPoller?.()
+    stopTopmostWatchdog?.()
     pomodoro?.dispose()
     bubble.dispose()
   })

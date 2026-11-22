@@ -80,3 +80,25 @@ export function createPetWindow(scale = 1): BrowserWindow {
 
   return win
 }
+
+/** 置顶自愈间隔：足够短，用户几乎察觉不到空白；又足够长，避免频繁改动系统 z 序 */
+const TOPMOST_HEAL_MS = 1200
+
+/**
+ * 置顶自愈。
+ *
+ * Windows 上某些应用的窗口（实测为系统「照片」）关闭后，会让透明置顶窗口的 DWM 呈现失效：
+ * 窗口依然可见、置顶标志也在、位置尺寸不变，但整窗不再绘制，看起来就是桌宠凭空消失；
+ * 手动重新点一次「始终置顶」就会恢复。这里用同样的方式定期强制重设一次置顶，
+ * 让失效的呈现被重新合成，把「用户手动点两次」变成自动兜底。
+ *
+ * 用户从托盘取消「始终置顶」后 isAlwaysOnTop() 为 false，此时不干预。
+ */
+export function startTopmostWatchdog(win: BrowserWindow): () => void {
+  const timer = setInterval(() => {
+    if (win.isDestroyed() || !win.isAlwaysOnTop()) return
+    win.setAlwaysOnTop(false)
+    win.setAlwaysOnTop(true, 'screen-saver')
+  }, TOPMOST_HEAL_MS)
+  return () => clearInterval(timer)
+}
