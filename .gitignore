@@ -22,3 +22,4 @@ desktop.ini
 # 本地环境变量
 .env
 .env.local
+HANDOFF.md
