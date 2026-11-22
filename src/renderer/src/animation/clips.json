@@ -34,6 +34,13 @@
     "interruptible": true,
     "anchor": { "x": 150, "y": 270 }
   },
+  "action_taunt": {
+    "fps": 24.15,
+    "loop": "once",
+    "frameCount": 289,
+    "interruptible": true,
+    "anchor": { "x": 150, "y": 270 }
+  },
   "grab_startle": {
     "fps": 30,
     "loop": "once",

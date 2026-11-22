@@ -30,7 +30,13 @@ export function isHomeworkState(state: PetState): boolean {
 }
 
 /** 日常动作池：待机超时与点击共用，随机挑一个播放 */
-export const DAILY_ACTION_CLIPS = ['action_wag', 'action_stretch', 'action_look', 'action_yawn']
+export const DAILY_ACTION_CLIPS = [
+  'action_wag',
+  'action_stretch',
+  'action_look',
+  'action_yawn',
+  'action_taunt'
+]
 
 /** 随机挑一个日常动作，尽量不与上一个重复 */
 export function pickDailyAction(prev: string | null): string {

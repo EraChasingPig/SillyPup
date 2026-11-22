@@ -12,7 +12,7 @@ const MASK_INTERVAL_MS = 120
 /** Idle 静置多久后进入日常动作 */
 const IDLE_DWELL_MS = 12000
 /** 多久没有任何操作就去睡觉 */
-const SLEEP_AFTER_MS = 60000
+const SLEEP_AFTER_MS = 180000
 /** 按键气泡显示时长（与 .stage-key 的动画时长一致） */
 const KEY_BUBBLE_MS = 900
 /** 敲键盘动作持续时长 */
@@ -109,7 +109,13 @@ export default function PetCanvas(): JSX.Element {
     // 拎起/悬空/落地素材帧数多，启动稳定后按顺序空闲预加载，避免交互瞬间等待解码
     const preloadTimer = setTimeout(() => {
       void (async () => {
-        for (const clipId of ['grab_startle', 'grab_hold', 'drop_land', 'sleep_enter']) {
+        for (const clipId of [
+          'grab_startle',
+          'grab_hold',
+          'drop_land',
+          'sleep_enter',
+          'action_taunt'
+        ]) {
           try {
             await spriteSource.load(clipId)
           } catch {
