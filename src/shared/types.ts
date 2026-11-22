@@ -16,6 +16,12 @@ export const PET_BASE_SIZE = 300
 export const PET_SCALE_MIN = 0.6
 export const PET_SCALE_MAX = 1.6
 
+/**
+ * 拎起时鼠标「捏住」的位置，取悬挂姿态头顶后颈处（300×300 画布坐标）。
+ * 拖拽期间窗口按这个点跟手，缩放时按比例换算。
+ */
+export const PET_GRAB_ANCHOR: Point = { x: 150, y: 66 }
+
 // 桌宠模式：normal 为日常形态，focus 为「敲键盘」形态
 export type PetMode = 'normal' | 'focus'
 
@@ -27,7 +33,13 @@ export type PetState =
   | 'Grabbed'
   | 'Dragging'
   | 'Dropped'
-  | 'Land'
+  | 'Sleepy'
+  | 'Sleeping'
+  | 'Wake'
+  | 'HomeworkEnter'
+  | 'Homework'
+  | 'Doze'
+  | 'HomeworkDone'
 
 // 状态机事件
 export type PetEvent =
@@ -36,6 +48,11 @@ export type PetEvent =
   | { t: 'DRAG_END'; pt: Point }
   | { t: 'ANIM_END'; clipId: string }
   | { t: 'IDLE_TIMEOUT' }
+  | { t: 'SLEEP' }
+  | { t: 'WAKE' }
+  | { t: 'POMO_START' }
+  | { t: 'POMO_END' }
+  | { t: 'DOZE' }
   | { t: 'MODE_CHANGED'; mode: PetMode }
 
 /** 主进程 → 渲染层 的输入事件子集 */

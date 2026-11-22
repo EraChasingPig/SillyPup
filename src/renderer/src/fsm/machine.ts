@@ -7,9 +7,26 @@ export const STATE_CLIP: Record<PetState, string> = {
   Action: 'action_wag',
   Interact: 'action_wag',
   Grabbed: 'grab_startle',
-  Dragging: 'drag_kick',
-  Dropped: 'dropped_fall',
-  Land: 'land_bounce'
+  Dragging: 'grab_hold',
+  // 落地、眩晕、爬起、待机都包含在同一段素材里，播完直接回 Idle
+  Dropped: 'drop_land',
+  Sleepy: 'sleep_enter',
+  Sleeping: 'sleep_loop',
+  Wake: 'sleep_wake',
+  HomeworkEnter: 'homework_enter',
+  Homework: 'homework_loop',
+  Doze: 'homework_doze',
+  HomeworkDone: 'homework_done'
+}
+
+/** 写作业相关状态（专注期间这些状态由素材自己画书桌，不再叠加 Focus 场景） */
+export function isHomeworkState(state: PetState): boolean {
+  return (
+    state === 'HomeworkEnter' ||
+    state === 'Homework' ||
+    state === 'Doze' ||
+    state === 'HomeworkDone'
+  )
 }
 
 /** 日常动作池：待机超时与点击共用，随机挑一个播放 */
@@ -74,10 +91,40 @@ export class PetFSM {
 
       case 'CLICK': {
         if (now < this.cooldownUntil) return null
+        // 睡觉时点击是叫醒，不触发日常动作
+        if (state === 'Sleepy' || state === 'Sleeping') return 'Wake'
         // 日常动作播放中忽略点击，避免 4 秒动作被半途打断后重新起播
-        const busy: PetState[] = ['Action', 'Interact', 'Grabbed', 'Dragging', 'Dropped', 'Land']
+        const busy: PetState[] = [
+          'Action',
+          'Interact',
+          'Grabbed',
+          'Dragging',
+          'Dropped',
+          'Wake',
+          'HomeworkEnter',
+          'Homework',
+          'Doze',
+          'HomeworkDone'
+        ]
         return busy.includes(state) ? null : 'Interact'
       }
+
+      case 'SLEEP':
+        return state === 'Idle' || state === 'Action' ? 'Sleepy' : null
+
+      case 'WAKE':
+        return state === 'Sleepy' || state === 'Sleeping' ? 'Wake' : null
+
+      case 'POMO_START':
+        return state === 'Idle' ? 'HomeworkEnter' : null
+
+      case 'POMO_END':
+        return state === 'HomeworkEnter' || state === 'Homework' || state === 'Doze'
+          ? 'HomeworkDone'
+          : null
+
+      case 'DOZE':
+        return state === 'Homework' ? 'Doze' : null
 
       case 'DRAG_END':
         return state === 'Grabbed' || state === 'Dragging' ? 'Dropped' : null
@@ -87,8 +134,15 @@ export class PetFSM {
           case 'Grabbed':
             return 'Dragging'
           case 'Dropped':
-            return 'Land'
-          case 'Land':
+            return 'Idle'
+          case 'Sleepy':
+            return 'Sleeping'
+          case 'HomeworkEnter':
+          case 'Doze':
+            return 'Homework'
+          case 'HomeworkDone':
+            return 'Idle'
+          case 'Wake':
           case 'Interact':
           case 'Action':
             return 'Idle'

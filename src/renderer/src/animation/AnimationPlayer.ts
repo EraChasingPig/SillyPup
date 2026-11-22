@@ -43,6 +43,16 @@ export class AnimationPlayer {
     return this.clip?.id ?? null
   }
 
+  /** 当前片段已播放时长（循环片段会持续累加，用于判断是否播满一轮） */
+  get elapsedMs(): number {
+    return this.elapsed
+  }
+
+  /** 当前片段单轮时长，无片段时为 0 */
+  get durationMs(): number {
+    return this.clip ? (this.clip.frames.length / this.clip.fps) * 1000 : 0
+  }
+
   /** 当前应绘制的帧；无动画时返回 null */
   get currentFrame(): CanvasImageSource | null {
     if (!this.clip) return null

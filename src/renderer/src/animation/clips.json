@@ -35,9 +35,16 @@
     "anchor": { "x": 150, "y": 270 }
   },
   "grab_startle": {
-    "fps": 18,
+    "fps": 30,
     "loop": "once",
-    "frameCount": 6,
+    "frameCount": 169,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "grab_hold": {
+    "fps": 24.1,
+    "loop": "loop",
+    "frameCount": 145,
     "interruptible": false,
     "anchor": { "x": 150, "y": 270 }
   },
@@ -48,17 +55,59 @@
     "interruptible": false,
     "anchor": { "x": 150, "y": 270 }
   },
-  "dropped_fall": {
-    "fps": 20,
+  "drop_land": {
+    "fps": 24.1,
     "loop": "once",
-    "frameCount": 6,
+    "frameCount": 145,
     "interruptible": false,
     "anchor": { "x": 150, "y": 270 }
   },
-  "land_bounce": {
-    "fps": 18,
+  "sleep_enter": {
+    "fps": 24.15,
     "loop": "once",
-    "frameCount": 8,
+    "frameCount": 97,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "sleep_loop": {
+    "fps": 24.1,
+    "loop": "loop",
+    "frameCount": 145,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "sleep_wake": {
+    "fps": 24.1,
+    "loop": "once",
+    "frameCount": 145,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "homework_enter": {
+    "fps": 24.15,
+    "loop": "once",
+    "frameCount": 97,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "homework_loop": {
+    "fps": 24.1,
+    "loop": "loop",
+    "frameCount": 145,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "homework_doze": {
+    "fps": 24.1,
+    "loop": "once",
+    "frameCount": 145,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "homework_done": {
+    "fps": 24.1,
+    "loop": "once",
+    "frameCount": 145,
     "interruptible": false,
     "anchor": { "x": 150, "y": 270 }
   }

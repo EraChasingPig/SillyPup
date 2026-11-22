@@ -1,6 +1,6 @@
 import { BrowserWindow, screen } from 'electron'
 import koffi from 'koffi'
-import { PET_BASE_SIZE } from '../shared/types'
+import { PET_BASE_SIZE, PET_GRAB_ANCHOR } from '../shared/types'
 import type { PetInputEvent, Point, Size } from '../shared/types'
 import type { HitMaskStore } from './hitMask'
 
@@ -10,6 +10,14 @@ const VK_RBUTTON = 0x02
 const DRAG_THRESHOLD = 5
 /** 右键沿左上-右下对角线移动超过该距离才进入缩放，避免误触 */
 const SCALE_THRESHOLD = 6
+/** 拎起后从按下点滑到后颈抓取点的过渡时长，避免窗口瞬间跳一截 */
+const GRAB_ALIGN_MS = 280
+/** 松手后先悬停的“惯性”时长，与 drop_land 前 1.5 秒的悬空段对齐 */
+const DROP_HOLD_MS = 1500
+/** 真正下落的时长，与素材落地帧（约 2.45s）对齐 */
+const DROP_FALL_MS = 950
+/** 下落距离基准，按当前缩放换算，落地时窗口停住 */
+const DROP_FALL_BASE_PX = 250
 
 /** 缩放控制：主进程负责改窗口大小，并把结果同步给渲染层 */
 export interface ScaleController {
@@ -67,8 +75,16 @@ export function startInteraction(
 ): () => void {
   let pressed = false
   let dragStarted = false
+  /** 拎起后开始滑向后颈抓取点的时刻 */
+  let dragAlignAt = 0
   let pressPoint: Point = { x: 0, y: 0 }
   let grabOffset: Point = { x: 0, y: 0 }
+
+  // 放下时的窗口下落状态（松手后先悬停，再匀加速落到底）
+  let dropping = false
+  let dropStartedAt = 0
+  let dropStartY = 0
+  let dropDist = 0
   let prevDown = false
   let prevRightDown = false
   let ignoring = true
@@ -97,20 +113,33 @@ export function startInteraction(
       win.setIgnoreMouseEvents(ignoring, { forward: true })
     }
 
+    // 放下三段式：先悬停（惯性），再匀加速下落，落地后停住
+    if (dropping) {
+      const t = performance.now() - dropStartedAt
+      if (t >= DROP_HOLD_MS + DROP_FALL_MS) {
+        win.setPosition(wx, Math.round(dropStartY + dropDist))
+        dropping = false
+      } else if (t > DROP_HOLD_MS) {
+        const k = (t - DROP_HOLD_MS) / DROP_FALL_MS
+        win.setPosition(wx, Math.round(dropStartY + dropDist * k * k))
+      }
+    }
+
     const pressEdge = down && !prevDown
     const releaseEdge = !down && prevDown
 
     const rightDown = isRightButtonDown()
 
     // 右键：按下时先记录起点，拖动沿对角线缩放，松开时若没缩放才弹菜单
-    if (rightDown && !prevRightDown && hit) {
+    // 拎起期间禁用缩放，避免和拖拽争夺同一个窗口
+    if (rightDown && !prevRightDown && hit && !dragStarted) {
       rightPressed = true
       scaling = false
       rightPressPoint = cursor
       scaleStart = scale.get()
     }
 
-    if (rightDown && rightPressed) {
+    if (rightDown && rightPressed && !dragStarted) {
       const dx = cursor.x - rightPressPoint.x
       const dy = cursor.y - rightPressPoint.y
       // 只取沿 (1,1) 对角线的投影：左上为负（缩小），右下为正（放大）
@@ -148,17 +177,30 @@ export function startInteraction(
         const dx = cursor.x - pressPoint.x
         const dy = cursor.y - pressPoint.y
         if (Math.hypot(dx, dy) >= DRAG_THRESHOLD) {
+          // 拎起前先结束可能进行中的右键缩放
+          if (rightPressed) {
+            if (scaling) scale.commit()
+            rightPressed = false
+            scaling = false
+          }
           dragStarted = true
+          dropping = false
+          dragAlignAt = performance.now()
           onInput({ t: 'DRAG_START', pt: cursor })
         }
       }
 
       if (dragStarted) {
-        const next = clampToWorkArea(
-          { x: cursor.x - grabOffset.x, y: cursor.y - grabOffset.y },
-          bounds
-        )
-        win.setPosition(next.x, next.y)
+        // 按下点只是“抓到了”，松开前要滑到后颈抓取点：小狗被拎起后竖直悬空，
+        // 鼠标应捏在头顶后颈处，否则光标会落在肚子/腿上
+        const s = scale.get()
+        const k = Math.min(1, (performance.now() - dragAlignAt) / GRAB_ALIGN_MS)
+        const ease = 1 - Math.pow(1 - k, 3)
+        const offsetX = grabOffset.x + (PET_GRAB_ANCHOR.x * s - grabOffset.x) * ease
+        const offsetY = grabOffset.y + (PET_GRAB_ANCHOR.y * s - grabOffset.y) * ease
+        const next = clampToWorkArea({ x: cursor.x - offsetX, y: cursor.y - offsetY }, bounds)
+        // setPosition 只接受整数，缓动产生的浮点值会直接抛 TypeError
+        win.setPosition(Math.round(next.x), Math.round(next.y))
       }
     }
 
@@ -169,6 +211,15 @@ export function startInteraction(
         const [px, py] = win.getPosition()
         const clamped = clampToWorkArea({ x: px, y: py }, bounds)
         win.setPosition(clamped.x, clamped.y)
+
+        // 预留下落空间，避免窗口落出工作区
+        const wa = screen.getDisplayNearestPoint(clamped).workArea
+        const room = wa.y + wa.height - (clamped.y + bounds.height)
+        const dist = Math.round(DROP_FALL_BASE_PX * scale.get())
+        dropDist = Math.max(0, Math.min(dist, room))
+        dropStartY = clamped.y
+        dropStartedAt = performance.now()
+        dropping = dropDist > 0
       } else {
         onInput({ t: 'CLICK' })
       }

@@ -84,12 +84,6 @@ function transformFor(clipId: string, p: number): Transform {
       const s = Math.sin(p * tau)
       return { ...base, rot: s * 0.08, dy: -18 + s * 4 }
     }
-    case 'dropped_fall':
-      return { ...base, dy: -60 * (1 - p) }
-    case 'land_bounce': {
-      const squash = Math.sin(p * Math.PI) * Math.exp(-p * 2.2)
-      return { ...base, sx: 1 + squash * 0.18, sy: 1 - squash * 0.22 }
-    }
     default:
       return base
   }
@@ -169,8 +163,9 @@ class SpriteSource implements AnimationSource {
 
     if (urls && urls.length > 0) {
       // 逐帧素材：帧内已经包含动作和原视频的地面阴影，不再叠加程序化形变/投影
-      for (const url of urls) {
-        const img = await loadImage(url)
+      // 并行预加载，避免上百帧的片段逐张等待导致拖拽/点击响应变慢
+      const imgs = await Promise.all(urls.map((url) => loadImage(url)))
+      for (const img of imgs) {
         const canvas = new OffscreenCanvas(W, H)
         const ctx = canvas.getContext('2d')
         if (!ctx) throw new Error('OffscreenCanvas 2D 上下文创建失败')
