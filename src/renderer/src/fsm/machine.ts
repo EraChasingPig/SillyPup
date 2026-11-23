@@ -18,7 +18,27 @@ export const STATE_CLIP: Record<PetState, string> = {
   Doze: 'homework_doze',
   HomeworkDone: 'homework_done',
   // Roam 的动画由 Locomotion 编排，这里只作为兜底
-  Roam: 'walk_loop'
+  Roam: 'walk_loop',
+  // 坐姿讨食：正面素材，按当前朝向镜像，与待机/走路的朝向保持一致
+  SitEnter: 'sit_enter',
+  SitIdle: 'sit_idle',
+  SitEat: 'sit_eat_happy',
+  SitAngry: 'sit_angry',
+  // 指屏幕：背对/回头素材，同样按当前朝向镜像
+  PointPeek: 'point_peek',
+  PointShow: 'point_show'
+}
+
+/** 坐姿讨食系列状态（正面朝观众，且都算「有互动」） */
+export function isSitState(state: PetState): boolean {
+  return (
+    state === 'SitEnter' || state === 'SitIdle' || state === 'SitEat' || state === 'SitAngry'
+  )
+}
+
+/** 指屏幕系列状态（播放期间算「有互动」，点击忽略、拖拽可打断） */
+export function isPointState(state: PetState): boolean {
+  return state === 'PointPeek' || state === 'PointShow'
 }
 
 /** 写作业相关状态（专注期间这些状态由素材自己画书桌，不再叠加 Focus 场景） */
@@ -101,6 +121,8 @@ export class PetFSM {
         if (now < this.cooldownUntil) return null
         // 睡觉时点击是叫醒，不触发日常动作
         if (state === 'Sleepy' || state === 'Sleeping') return 'Wake'
+        // 坐姿等待时点击 = 喂苹果
+        if (state === 'SitIdle') return 'SitEat'
         // 日常动作播放中忽略点击，避免 4 秒动作被半途打断后重新起播
         const busy: PetState[] = [
           'Action',
@@ -113,7 +135,12 @@ export class PetFSM {
           'Homework',
           'Doze',
           'HomeworkDone',
-          'Roam'
+          'Roam',
+          'SitEnter',
+          'SitEat',
+          'SitAngry',
+          'PointPeek',
+          'PointShow'
         ]
         return busy.includes(state) ? null : 'Interact'
       }
@@ -125,13 +152,18 @@ export class PetFSM {
         return state === 'Roam' ? 'Idle' : null
 
       case 'SLEEP':
-        return state === 'Idle' || state === 'Action' ? 'Sleepy' : null
+        // 只在真正的待机循环里入睡；正在播日常动作等一次性动画时等它播完，
+        // 回到 Idle 后静置计时仍超时，下一帧会再次触发
+        return state === 'Idle' ? 'Sleepy' : null
 
       case 'WAKE':
         return state === 'Sleepy' || state === 'Sleeping' ? 'Wake' : null
 
       case 'POMO_START':
-        return state === 'Idle' ? 'HomeworkEnter' : null
+        // 坐着讨食、看屏幕指东西时开番茄钟，也要能进入作业链
+        return state === 'Idle' || isSitState(state) || isPointState(state)
+          ? 'HomeworkEnter'
+          : null
 
       case 'POMO_END':
         return state === 'HomeworkEnter' || state === 'Homework' || state === 'Doze'
@@ -140,6 +172,20 @@ export class PetFSM {
 
       case 'DOZE':
         return state === 'Homework' ? 'Doze' : null
+
+      case 'SIT_TRIGGER':
+        // 与 CLICK 共用交互冷却，避免刚做完动作就立刻坐下
+        if (now < this.cooldownUntil) return null
+        return state === 'Idle' ? 'SitEnter' : null
+
+      case 'SIT_TIMEOUT':
+        // 坐太久没等到苹果，生气撒泼再起身
+        return state === 'SitIdle' ? 'SitAngry' : null
+
+      case 'POINT_TRIGGER':
+        // 与 CLICK / SIT_TRIGGER 共用交互冷却
+        if (now < this.cooldownUntil) return null
+        return state === 'Idle' ? 'PointPeek' : null
 
       case 'DRAG_END':
         return state === 'Grabbed' || state === 'Dragging' ? 'Dropped' : null
@@ -156,6 +202,15 @@ export class PetFSM {
           case 'Doze':
             return 'Homework'
           case 'HomeworkDone':
+            return 'Idle'
+          case 'SitEnter':
+            return 'SitIdle'
+          case 'SitEat':
+          case 'SitAngry':
+            return 'Idle'
+          case 'PointPeek':
+            return 'PointShow'
+          case 'PointShow':
             return 'Idle'
           case 'Wake':
           case 'Interact':

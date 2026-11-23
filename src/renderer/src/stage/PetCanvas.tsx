@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { spriteSource, CANVAS_SIZE } from '../animation/SpriteSource'
 import { AnimationPlayer } from '../animation/AnimationPlayer'
-import { PetFSM, STATE_CLIP, isHomeworkState, pickDailyAction } from '../fsm/machine'
+import { PetFSM, STATE_CLIP, isHomeworkState, isSitState, isPointState, pickDailyAction } from '../fsm/machine'
 import { Locomotion, type Facing } from '../fsm/locomotion'
 import { drawFocusScene, mapToPad, padCenter, smoothHand } from './focusScene'
 import { Sway } from './sway'
 import { PET_GRAB_ANCHOR } from '../../../shared/types'
-import type { CursorPayload, PetState } from '../../../shared/types'
+import type { CursorPayload, PetEvent, PetState } from '../../../shared/types'
 
 /** 掩码降采样分辨率：64×64 足够判断光标是否压在身上 */
 const MASK_RES = 64
@@ -14,6 +14,14 @@ const MASK_RES = 64
 const MASK_INTERVAL_MS = 120
 /** Idle 静置多久后进入日常动作 */
 const IDLE_DWELL_MS = 12000
+/** 待机转坐姿讨食的概率（超时与点击共用） */
+const SIT_CHANCE = 0.15
+/** 待机转「看屏幕指东西」的概率（超时与点击共用） */
+const POINT_CHANCE = 0.15
+/** 坐姿与指屏幕之间的最小间隔，避免特殊行为连续触发 */
+const SPECIAL_COOLDOWN_MS = 30000
+/** 坐着等苹果的忍耐时长，超时就生气撒泼 */
+const SIT_GIVEUP_MS = 60000
 /** 多久没有任何操作就去睡觉 */
 const SLEEP_AFTER_MS = 180000
 /** 按键气泡显示时长（与 .stage-key 的动画时长一致） */
@@ -88,15 +96,28 @@ export default function PetCanvas(): JSX.Element {
     let stateEnteredAt = performance.now()
     let lastInputAt = performance.now()
     let lastActionClip: string | null = null
+    /** 上一次坐姿/指屏幕的触发时间，用于 30 秒特殊行为冷却 */
+    let lastSpecialAt = Number.NEGATIVE_INFINITY
     /** 下一次插入打瞌睡的时刻（4~6 个作业循环后） */
     let dozeAt = Number.POSITIVE_INFINITY
     /** 手动提前停止番茄钟：等当前这轮动画播完再收尾 */
     let pomoEndPending = false
     /** 停止时正处于入场/打瞌睡，片段播完直接收尾，不再多播一轮循环 */
     let pomoEndSkipLoop = false
+    /** 掷一次特殊行为：指屏幕 15%、坐姿 15%，其余交给日常动作；冷却期内不触发 */
+    const rollSpecial = (now: number): PetEvent | null => {
+      if (now - lastSpecialAt < SPECIAL_COOLDOWN_MS) return null
+      const r = Math.random()
+      if (r < POINT_CHANCE) return { t: 'POINT_TRIGGER' }
+      if (r < POINT_CHANCE + SIT_CHANCE) return { t: 'SIT_TRIGGER' }
+      return null
+    }
+
     const fsm = new PetFSM((_from, to) => {
       stateEnteredAt = performance.now()
       setState(to)
+      // 坐姿与指屏幕共享 30 秒特殊行为冷却
+      if (to === 'SitEnter' || to === 'PointPeek') lastSpecialAt = performance.now()
       // 待机超时与点击共用日常动作池，随机挑一个且不与上次重复
       let clipId = STATE_CLIP[to]
       if (to === 'Action' || to === 'Interact') {
@@ -125,6 +146,18 @@ export default function PetCanvas(): JSX.Element {
         const dir = pendingWalk
         pendingWalk = null
         loco?.request(dir)
+      }
+      // 坐姿素材帧数多，趁坐下和发呆的时间提前解码下一段
+      if (to === 'SitEnter') {
+        void spriteSource.load('sit_idle')
+      }
+      if (to === 'SitIdle') {
+        void spriteSource.load('sit_eat_happy')
+        void spriteSource.load('sit_angry')
+      }
+      // 看屏幕 4 秒，趁这段时间把回头的 6 秒片段解码好
+      if (to === 'PointPeek') {
+        void spriteSource.load('point_show')
       }
     })
     fsmInstance = fsm
@@ -236,10 +269,11 @@ export default function PetCanvas(): JSX.Element {
       // clip 切换时先快照上一帧，新片段首帧绘制后再淡出快照
       const clipId = player.clipId
       if (clipId && clipId !== drawnClipId) {
-        // 行走四段是同一套连续动作，走→走的切换不做淡化；
-        // 只有进出非行走片段（待机→起步、刹车→待机）才需要淡化遮住姿势差
-        const seamless =
-          drawnClipId !== null && clipId.startsWith('walk_') && drawnClipId.startsWith('walk_')
+        // 行走四段、看屏幕两段都是同一套连续动作，段间不做淡化；
+        // 只有进出这些连续片段（待机→起步、指完→待机）才需要淡化遮住姿势差
+        const isChainClip = (id: string | null): boolean =>
+          id !== null && (id.startsWith('walk_') || id.startsWith('point_'))
+        const seamless = isChainClip(drawnClipId) && isChainClip(clipId)
         if (drawnClipId && fadeCtx && !seamless) {
           if (fadeCanvas.width !== canvas.width || fadeCanvas.height !== canvas.height) {
             fadeCanvas.width = canvas.width
@@ -363,9 +397,15 @@ export default function PetCanvas(): JSX.Element {
         }
       }
 
-      // 走路属于「有活动」：行进期间持续刷新活动时间，
-      // 否则静置计时会一路累加，刚停下就直接触发入睡
-      if (fsm.current === 'Roam') lastInputAt = now
+      // 走路、坐姿互动、看屏幕指东西都属于「有活动」：期间持续刷新活动时间，
+      // 否则静置计时会一路累加，刚坐下就直接触发入睡
+      if (
+        fsm.current === 'Roam' ||
+        isSitState(fsm.current) ||
+        isPointState(fsm.current)
+      ) {
+        lastInputAt = now
+      }
 
       // 番茄钟期间：写作业循环，每 4~6 轮插一次打瞌睡；
       // 非专注时段：静置一会儿随机播日常动作，超过 1 分钟无操作就入睡。
@@ -377,10 +417,13 @@ export default function PetCanvas(): JSX.Element {
           fsm.send({ t: 'DOZE' })
         }
       } else if (!focusModeRef.current) {
-        if (idleMs > SLEEP_AFTER_MS) {
+        if (fsm.current === 'SitIdle' && now - stateEnteredAt > SIT_GIVEUP_MS) {
+          // 等了 60 秒没等到苹果，生气撒泼
+          fsm.send({ t: 'SIT_TIMEOUT' })
+        } else if (idleMs > SLEEP_AFTER_MS) {
           fsm.send({ t: 'SLEEP' })
         } else if (fsm.current === 'Idle' && now - stateEnteredAt > IDLE_DWELL_MS) {
-          fsm.send({ t: 'IDLE_TIMEOUT' })
+          fsm.send(rollSpecial(now) ?? { t: 'IDLE_TIMEOUT' })
         }
       }
 
@@ -396,6 +439,14 @@ export default function PetCanvas(): JSX.Element {
         loco?.abort()
         // 拎起后主进程会用 200ms 把光标对齐到后颈，这段缓动会伪造横向速度，先忽略
         sway.begin(performance.now(), 220)
+      }
+      // 待机时点一下：先掷特殊行为（指屏幕 15% / 坐姿 15%），没抽中就走日常互动
+      if (e.t === 'CLICK' && !focusModeRef.current && fsm.current === 'Idle') {
+        const special = rollSpecial(performance.now())
+        if (special) {
+          fsm.send(special)
+          return
+        }
       }
       fsm.send(e)
     })

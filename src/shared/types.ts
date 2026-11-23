@@ -41,6 +41,12 @@ export type PetState =
   | 'Doze'
   | 'HomeworkDone'
   | 'Roam'
+  | 'SitEnter'
+  | 'SitIdle'
+  | 'SitEat'
+  | 'SitAngry'
+  | 'PointPeek'
+  | 'PointShow'
 
 // 状态机事件
 export type PetEvent =
@@ -56,6 +62,9 @@ export type PetEvent =
   | { t: 'DOZE' }
   | { t: 'WALK_START' }
   | { t: 'WALK_END' }
+  | { t: 'SIT_TRIGGER' }
+  | { t: 'SIT_TIMEOUT' }
+  | { t: 'POINT_TRIGGER' }
   | { t: 'MODE_CHANGED'; mode: PetMode }
 
 /** 主进程 → 渲染层 的输入事件子集 */

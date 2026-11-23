@@ -145,5 +145,47 @@
     "frameCount": 122,
     "interruptible": false,
     "anchor": { "x": 150, "y": 270 }
+  },
+  "sit_enter": {
+    "fps": 24,
+    "loop": "once",
+    "frameCount": 97,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "sit_idle": {
+    "fps": 24,
+    "loop": "loop",
+    "frameCount": 97,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "sit_eat_happy": {
+    "fps": 24,
+    "loop": "once",
+    "frameCount": 193,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "sit_angry": {
+    "fps": 24,
+    "loop": "once",
+    "frameCount": 145,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "point_peek": {
+    "fps": 24,
+    "loop": "once",
+    "frameCount": 97,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "point_show": {
+    "fps": 24,
+    "loop": "once",
+    "frameCount": 145,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
   }
 }
