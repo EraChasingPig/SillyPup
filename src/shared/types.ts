@@ -40,6 +40,7 @@ export type PetState =
   | 'Homework'
   | 'Doze'
   | 'HomeworkDone'
+  | 'Roam'
 
 // 状态机事件
 export type PetEvent =
@@ -53,6 +54,8 @@ export type PetEvent =
   | { t: 'POMO_START' }
   | { t: 'POMO_END' }
   | { t: 'DOZE' }
+  | { t: 'WALK_START' }
+  | { t: 'WALK_END' }
   | { t: 'MODE_CHANGED'; mode: PetMode }
 
 /** 主进程 → 渲染层 的输入事件子集 */
@@ -96,8 +99,18 @@ export const IPC_CHANNELS = {
   /** 主进程 → 渲染层：全局光标位置（用于鼠标垫映射） */
   CURSOR: 'pet:cursor',
   /** 主进程 → 渲染层：桌宠缩放比例 */
-  SCALE: 'pet:scale'
+  SCALE: 'pet:scale',
+  /** 主进程 → 渲染层：托盘发起的移动指令 */
+  LOCOMOTION: 'pet:locomotion',
+  /** 渲染层 → 主进程：开始 / 停止窗口水平位移 */
+  MOVE: 'pet:move'
 } as const
+
+/** 移动指令入口（目前只有托盘临时菜单） */
+export type LocomotionCmd = 'walk-left' | 'walk-right' | 'stop'
+
+/** 窗口水平位移方向，null 表示停在原地 */
+export type MoveDirection = 'left' | 'right' | null
 
 export interface PomodoroTick {
   remainMs: number

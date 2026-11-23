@@ -117,5 +117,33 @@
     "frameCount": 145,
     "interruptible": false,
     "anchor": { "x": 150, "y": 270 }
+  },
+  "walk_start": {
+    "fps": 30,
+    "loop": "once",
+    "frameCount": 57,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "walk_loop": {
+    "fps": 30,
+    "loop": "loop",
+    "frameCount": 18,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "walk_turn": {
+    "fps": 30,
+    "loop": "once",
+    "frameCount": 88,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "walk_stop": {
+    "fps": 30,
+    "loop": "once",
+    "frameCount": 122,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
   }
 }

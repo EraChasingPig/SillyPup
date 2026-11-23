@@ -10,11 +10,13 @@ import { popupContextMenu } from './contextMenu'
 import { promptMinutes } from './prompt'
 import { startKeyPoller } from './keyPoller'
 import { startCursorPoller } from './cursorPoller'
+import { createMover } from './mover'
+import type { Mover } from './mover'
 import { loadConfig, saveConfig } from './config'
 import { setupLogger, logInfo } from './logger'
 import { applyAutoLaunch } from './autoLaunch'
 import { IPC_CHANNELS } from '../shared/types'
-import type { FocusState, HitMask, PetInputEvent } from '../shared/types'
+import type { FocusState, HitMask, MoveDirection, PetInputEvent } from '../shared/types'
 
 // Windows 下 Chromium 的窗口遮挡检测会把被其他窗口盖住的窗口判为“被遮挡”并停止合成。
 // 桌宠是透明置顶小窗，遮挡它的窗口关闭后合成不会自动恢复，表现为整只狗从屏幕上消失，
@@ -42,6 +44,7 @@ if (!gotLock) {
   let stopCursorPoller: (() => void) | null = null
   let stopTopmostWatchdog: (() => void) | null = null
   let pomodoro: PomodoroService | null = null
+  let mover: Mover | null = null
   let scaleAnchor: { x: number; y: number } | null = null
 
   const maskStore = new HitMaskStore()
@@ -63,7 +66,11 @@ if (!gotLock) {
     const petWindow = createPetWindow(config.scale)
     win = petWindow
     stopTopmostWatchdog = startTopmostWatchdog(petWindow)
-    tray = createTray(petWindow, config)
+    const walkMover = createMover(petWindow, () => config.scale)
+    mover = walkMover
+    tray = createTray(petWindow, config, (cmd) => {
+      petWindow.webContents.send(IPC_CHANNELS.LOCOMOTION, cmd)
+    })
 
     const service = new PomodoroService({
       onTick: (remainMs, running) => {
@@ -166,6 +173,11 @@ if (!gotLock) {
       maskStore.set(mask)
     })
 
+    // 渲染层决定行走节奏，主进程只负责按方向平移窗口
+    ipcMain.on(IPC_CHANNELS.MOVE, (_event, dir: MoveDirection) => {
+      walkMover.setDirection(dir)
+    })
+
     if (process.env['ELECTRON_RENDERER_URL']) {
       petWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
     } else {
@@ -184,6 +196,7 @@ if (!gotLock) {
     stopKeyPoller?.()
     stopCursorPoller?.()
     stopTopmostWatchdog?.()
+    mover?.dispose()
     pomodoro?.dispose()
     bubble.dispose()
   })

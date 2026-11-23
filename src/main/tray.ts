@@ -3,6 +3,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { saveConfig } from './config'
 import type { AppConfig } from './config'
+import type { LocomotionCmd } from '../shared/types'
 import { applyAutoLaunch } from './autoLaunch'
 import { logInfo, logError } from './logger'
 
@@ -22,7 +23,11 @@ function resolveTrayIconPath(): string | null {
 /**
  * 创建托盘。桌宠无边框且 skipTaskbar，用户只能靠托盘退出。
  */
-export function createTray(win: BrowserWindow, config: AppConfig): Tray {
+export function createTray(
+  win: BrowserWindow,
+  config: AppConfig,
+  onLocomotion: (cmd: LocomotionCmd) => void
+): Tray {
   const iconPath = resolveTrayIconPath()
   if (!iconPath) {
     logError('tray icon not found, candidates checked', app.getAppPath(), process.resourcesPath)
@@ -54,6 +59,11 @@ export function createTray(win: BrowserWindow, config: AppConfig): Tray {
         applyAutoLaunch(item.checked)
       }
     },
+    { type: 'separator' },
+    // 散步的临时入口，后续接入喂食模式与 WASD 主动控制后移除
+    { label: '向左走', click: () => onLocomotion('walk-left') },
+    { label: '向右走', click: () => onLocomotion('walk-right') },
+    { label: '停下', click: () => onLocomotion('stop') },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() }
   ])

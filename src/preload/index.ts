@@ -5,6 +5,8 @@ import type {
   FocusState,
   HitMask,
   KeyEventPayload,
+  LocomotionCmd,
+  MoveDirection,
   PetInputEvent,
   PomodoroTick
 } from '../shared/types'
@@ -92,6 +94,20 @@ const api = {
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.SCALE, handler)
     }
+  },
+
+  /** 主进程 → 渲染层：托盘发起的行走 / 停下指令 */
+  onLocomotion: (cb: (cmd: LocomotionCmd) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, cmd: LocomotionCmd): void => cb(cmd)
+    ipcRenderer.on(IPC_CHANNELS.LOCOMOTION, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.LOCOMOTION, handler)
+    }
+  },
+
+  /** 渲染层 → 主进程：开始 / 停止窗口水平位移 */
+  setMoving: (dir: MoveDirection): void => {
+    ipcRenderer.send(IPC_CHANNELS.MOVE, dir)
   }
 }
 

@@ -16,7 +16,9 @@ export const STATE_CLIP: Record<PetState, string> = {
   HomeworkEnter: 'homework_enter',
   Homework: 'homework_loop',
   Doze: 'homework_doze',
-  HomeworkDone: 'homework_done'
+  HomeworkDone: 'homework_done',
+  // Roam 的动画由 Locomotion 编排，这里只作为兜底
+  Roam: 'walk_loop'
 }
 
 /** 写作业相关状态（专注期间这些状态由素材自己画书桌，不再叠加 Focus 场景） */
@@ -110,10 +112,17 @@ export class PetFSM {
           'HomeworkEnter',
           'Homework',
           'Doze',
-          'HomeworkDone'
+          'HomeworkDone',
+          'Roam'
         ]
         return busy.includes(state) ? null : 'Interact'
       }
+
+      case 'WALK_START':
+        return state === 'Idle' ? 'Roam' : null
+
+      case 'WALK_END':
+        return state === 'Roam' ? 'Idle' : null
 
       case 'SLEEP':
         return state === 'Idle' || state === 'Action' ? 'Sleepy' : null
