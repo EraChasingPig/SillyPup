@@ -30,6 +30,8 @@ export interface AnimationClip {
 export interface AnimationSource {
   readonly kind: 'spritesheet' | 'procedural'
   load(clipId: string): Promise<AnimationClip>
+  /** 锁定当前播放的片段，资源层可据此回收其它不再使用的片段 */
+  pin(clipId: string): void
   /** 取某一帧可绘制对象（ImageBitmap / HTMLImageElement 等） */
   getFrame(clipId: string, frameIndex: number): CanvasImageSource | null
   dispose(): void

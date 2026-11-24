@@ -3,6 +3,7 @@ import { join } from 'path'
 import { createPetWindow, applyPetScale, startTopmostWatchdog } from './window'
 import { createTray } from './tray'
 import { startInteraction } from './interaction'
+import type { InteractionController } from './interaction'
 import { HitMaskStore } from './hitMask'
 import { PomodoroService } from './pomodoro'
 import { BubbleWindow } from './bubble'
@@ -36,7 +37,17 @@ app.commandLine.appendSwitch(
   'disable-features',
   disabledFeatures ? `${disabledFeatures},CalculateNativeWinOcclusion` : 'CalculateNativeWinOcclusion'
 )
+// 桌宠是几百像素的小透明窗，软件绘制完全够用；
+// 硬件加速会让 GPU 进程常驻并吃掉两三百 MB 显存，关掉后整体内存稳定在 200 MB 左右。
+app.disableHardwareAcceleration()
+
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
+
+// 打包后渲染层页面走 file://，帧素材用 fetch 读取时会被同源策略拦下。
+// 打开本地文件访问权限后即可 fetch 本地 PNG，解码结果只留一份 ImageBitmap，
+// 避免为每帧创建 <img> 把解码数据滞留在 Chromium 的图片缓存里。
+// 桌宠窗口只加载本地页面，且已禁止打开新窗口，放开该限制不影响外部内容。
+app.commandLine.appendSwitch('allow-file-access-from-files')
 
 // 日志最早就绪，后续启动失败也能留下线索
 setupLogger()
@@ -49,7 +60,7 @@ if (!gotLock) {
 } else {
   let win: BrowserWindow | null = null
   let tray: Electron.Tray | null = null
-  let stopInteraction: (() => void) | null = null
+  let interaction: InteractionController | null = null
   let stopKeyPoller: (() => void) | null = null
   let stopCursorPoller: (() => void) | null = null
   let stopTopmostWatchdog: (() => void) | null = null
@@ -84,8 +95,6 @@ if (!gotLock) {
     jumpMover = verticalMover
     const apple = new AppleWindow(petWindow, () => config.scale)
     appleWindow = apple
-    // 空闲时先把苹果页加载好，第一次召唤不出现空白
-    setTimeout(() => apple.preload(), 2500)
     tray = createTray(petWindow, config, (cmd) => {
       petWindow.webContents.send(IPC_CHANNELS.LOCOMOTION, cmd)
     })
@@ -125,7 +134,7 @@ if (!gotLock) {
     stopKeyPoller = keyPoller.stop
     stopCursorPoller = cursorPoller.stop
 
-    stopInteraction = startInteraction(
+    interaction = startInteraction(
       petWindow,
       maskStore,
       (e: PetInputEvent) => petWindow.webContents.send(IPC_CHANNELS.INPUT, e),
@@ -205,6 +214,10 @@ if (!gotLock) {
     ipcMain.on(IPC_CHANNELS.JUMP_CANCEL, () => {
       verticalMover.cancel()
     })
+    // drop_land 真正开播后再开始悬停+下落，保证窗口位移与动画对齐
+    ipcMain.on(IPC_CHANNELS.DROP_START, () => {
+      interaction?.beginDrop()
+    })
 
     // 苹果：渲染层负责规划与到点判定，主进程只搬窗口
     ipcMain.on(IPC_CHANNELS.APPLE_PIN, (_event, pos: ApplePos) => {
@@ -231,7 +244,7 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     logInfo('before-quit')
-    stopInteraction?.()
+    interaction?.stop()
     stopKeyPoller?.()
     stopCursorPoller?.()
     stopTopmostWatchdog?.()

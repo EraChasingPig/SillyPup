@@ -21,6 +21,8 @@ export class AnimationPlayer {
     const clip = await this.source.load(clipId)
     if (rid !== this.requestId) return
 
+    // 通知资源层：新片段开始播放，旧片段可以回收了
+    this.source.pin(clipId)
     this.clip = clip
     this.elapsed = 0
     this.finished = false

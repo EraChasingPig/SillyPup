@@ -16,15 +16,26 @@ const GRAB_ALIGN_MS = 280
 const DROP_HOLD_MS = 1500
 /** 真正下落的时长，与素材落地帧（约 2.45s）对齐 */
 const DROP_FALL_MS = 950
+/** 等待渲染层 drop_land 开播的上限：超过就直接落，避免渲染异常时狗一直悬在半空 */
+const DROP_START_TIMEOUT_MS = 800
 /** 下落距离基准，按当前缩放换算，落地时窗口停住 */
 const DROP_FALL_BASE_PX = 250
 
-/** 缩放控制：主进程负责改窗口大小，并把结果同步给渲染层 */
+/**
+ * 缩放控制：主进程负责改窗口大小，并把结果同步给渲染层
+ */
 export interface ScaleController {
   get: () => number
   begin: () => void
   set: (scale: number) => void
   commit: () => void
+}
+
+/** 交互控制器的句柄 */
+export interface InteractionController {
+  stop: () => void
+  /** 渲染层 drop_land 开播时调用：开始松手后的悬停 + 下落 */
+  beginDrop: () => void
 }
 
 // 通过 user32.GetAsyncKeyState 检测鼠标按键（轮询方案，不装钩子）
@@ -72,7 +83,7 @@ export function startInteraction(
   onInput: (e: PetInputEvent) => void,
   onContextMenu: (local: Point) => void,
   scale: ScaleController
-): () => void {
+): InteractionController {
   let pressed = false
   let dragStarted = false
   /** 拎起后开始滑向后颈抓取点的时刻 */
@@ -85,9 +96,20 @@ export function startInteraction(
   let dropStartedAt = 0
   let dropStartY = 0
   let dropDist = 0
+  /** 已松手、等渲染层 drop_land 开播；超时后强制开始 */
+  let awaitingDrop = false
+  let pendingDropAt = 0
   let prevDown = false
   let prevRightDown = false
   let ignoring = true
+
+  /** 开始松手后的悬停 + 下落 */
+  const beginDrop = (): void => {
+    if (!awaitingDrop) return
+    awaitingDrop = false
+    dropStartedAt = performance.now()
+    dropping = dropDist > 0
+  }
 
   // 右键缩放状态
   let rightPressed = false
@@ -114,6 +136,9 @@ export function startInteraction(
     }
 
     // 放下三段式：先悬停（惯性），再匀加速下落，落地后停住
+    if (awaitingDrop && performance.now() - pendingDropAt >= DROP_START_TIMEOUT_MS) {
+      beginDrop()
+    }
     if (dropping) {
       const t = performance.now() - dropStartedAt
       if (t >= DROP_HOLD_MS + DROP_FALL_MS) {
@@ -185,6 +210,7 @@ export function startInteraction(
           }
           dragStarted = true
           dropping = false
+          awaitingDrop = false
           dragAlignAt = performance.now()
           onInput({ t: 'DRAG_START', pt: cursor })
         }
@@ -218,8 +244,10 @@ export function startInteraction(
         const dist = Math.round(DROP_FALL_BASE_PX * scale.get())
         dropDist = Math.max(0, Math.min(dist, room))
         dropStartY = clamped.y
-        dropStartedAt = performance.now()
-        dropping = dropDist > 0
+        // 等渲染层把 drop_land 真正开始绘制再下落：解码/切换有延迟时，
+        // 若这里立刻开始落，窗口会先落地而动画还在下落，出现明显错位。
+        awaitingDrop = true
+        pendingDropAt = performance.now()
       } else {
         onInput({ t: 'CLICK' })
       }
@@ -231,5 +259,8 @@ export function startInteraction(
   }
 
   const timer = setInterval(tick, 16) // ~60Hz
-  return () => clearInterval(timer)
+  return {
+    stop: () => clearInterval(timer),
+    beginDrop
+  }
 }

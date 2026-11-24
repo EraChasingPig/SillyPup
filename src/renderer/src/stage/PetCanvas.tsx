@@ -70,6 +70,12 @@ const SEEK_MIN_GAIN = 10
 const JUMP_MAX_CHAIN_LOOPS = 8
 /** 串联期间允许苹果横向偏移超出到达容差的余量，超出就先落地走过去 */
 const JUMP_CHAIN_DX_SLACK = 20
+/** 拖拽三段体量大、又被高频触发，预热后常驻，避免每次拖拽重新解码导致动作整体延迟 */
+const DRAG_CLIPS = ['grab_startle', 'grab_hold', 'drop_land'] as const
+/** 启动后多久预热拖拽片段：避开首屏与开场动画 */
+const DRAG_WARMUP_DELAY_MS = 2000
+/** 缩放结束后多久按新尺寸重新预热：拖动缩放期间会不断变化，等停下再解码 */
+const SCALE_REWARM_DELAY_MS = 800
 
 function formatRemain(ms: number): string {
   const total = Math.ceil(ms / 1000)
@@ -111,9 +117,24 @@ export default function PetCanvas(): JSX.Element {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    // willReadFrequently：掩码需要周期性读回像素，走 CPU 后端避免 GPU 回读开销
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    // 全应用已关闭硬件加速，舞台用默认 2D 上下文即可；
+    // 掩码走独立的 64×64 小画布读取，舞台本身不再回读整幅像素
+    const ctx = canvas.getContext('2d')
     if (!ctx) return
+
+    // 帧按窗口缩放解码，先按当前缩放初始化一次
+    spriteSource.setRenderScale(scaleRef.current)
+
+    // 拖拽三段在后台预热并常驻；缩放变化会解除常驻，停下后按新尺寸重新预热
+    let warmTimer: ReturnType<typeof setTimeout> | null = null
+    const warmDragClips = (delay: number): void => {
+      if (warmTimer) clearTimeout(warmTimer)
+      warmTimer = setTimeout(() => {
+        warmTimer = null
+        void spriteSource.retain(DRAG_CLIPS)
+      }, delay)
+    }
+    warmDragClips(DRAG_WARMUP_DELAY_MS)
 
     let fsmInstance: PetFSM | null = null
     let loco: Locomotion | null = null
@@ -484,27 +505,6 @@ export default function PetCanvas(): JSX.Element {
 
     void player.play(STATE_CLIP[fsm.current])
 
-    // 拎起/悬空/落地素材帧数多，启动稳定后按顺序空闲预加载，避免交互瞬间等待解码
-    const preloadTimer = setTimeout(() => {
-      void (async () => {
-        for (const clipId of [
-          'grab_startle',
-          'grab_hold',
-          'drop_land',
-          'sleep_enter',
-          'action_taunt',
-          'walk_start',
-          'walk_loop'
-        ]) {
-          try {
-            await spriteSource.load(clipId)
-          } catch {
-            // 预加载失败不阻塞，交互时按需加载兜底
-          }
-        }
-      })()
-    }, 1500)
-
     // ---- 片段切换交叉淡化 ----
     const FADE_MS = 160
     const fadeCanvas = document.createElement('canvas')
@@ -514,44 +514,50 @@ export default function PetCanvas(): JSX.Element {
     let drawnClipId: string | null = null
 
     // ---- 命中掩码上报 ----
+    // 先把整张舞台缩到 64×64 再读像素，避免每 120ms 回读整幅 RGBA
+    const maskCanvas = document.createElement('canvas')
+    maskCanvas.width = MASK_RES
+    maskCanvas.height = MASK_RES
+    const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true })
+
     let lastMaskAt = 0
     const reportMask = (now: number): void => {
-      if (now - lastMaskAt < MASK_INTERVAL_MS) return
+      if (!maskCtx || now - lastMaskAt < MASK_INTERVAL_MS) return
       lastMaskAt = now
 
-      // 画布会随缩放变大，掩码与包围盒都按窗口实际像素计算
-      const W = canvas.width
-      const H = canvas.height
-      const data = ctx.getImageData(0, 0, W, H).data
+      maskCtx.clearRect(0, 0, MASK_RES, MASK_RES)
+      maskCtx.drawImage(canvas, 0, 0, MASK_RES, MASK_RES)
+      const data = maskCtx.getImageData(0, 0, MASK_RES, MASK_RES).data
       const cells = new Uint8Array(MASK_RES * MASK_RES)
-      const cellW = W / MASK_RES
-      const cellH = H / MASK_RES
 
-      let minX = W
-      let minY = H
-      let maxX = -1
-      let maxY = -1
+      let minGx = MASK_RES
+      let minGy = MASK_RES
+      let maxGx = -1
+      let maxGy = -1
 
-      for (let y = 0; y < H; y++) {
-        const gy = Math.min(MASK_RES - 1, (y / cellH) | 0)
-        const rowBase = gy * MASK_RES
-        for (let x = 0; x < W; x++) {
-          if (data[(y * W + x) * 4 + 3] > 25) {
-            const gx = Math.min(MASK_RES - 1, (x / cellW) | 0)
-            cells[rowBase + gx] = 1
-            if (x < minX) minX = x
-            if (x > maxX) maxX = x
-            if (y < minY) minY = y
-            if (y > maxY) maxY = y
-          }
-        }
+      for (let i = 0; i < cells.length; i++) {
+        if (data[i * 4 + 3] <= 25) continue
+        cells[i] = 1
+        const gx = i % MASK_RES
+        const gy = (i / MASK_RES) | 0
+        if (gx < minGx) minGx = gx
+        if (gx > maxGx) maxGx = gx
+        if (gy < minGy) minGy = gy
+        if (gy > maxGy) maxGy = gy
       }
 
-      if (maxX < 0) return // 理论上不会发生，防御空帧
+      if (maxGx < 0) return // 理论上不会发生，防御空帧
+
+      // 包围盒换算回窗口像素，格子对齐与 cells 的分辨率保持一致
+      const x = Math.floor((minGx * canvas.width) / MASK_RES)
+      const y = Math.floor((minGy * canvas.height) / MASK_RES)
+      const right = Math.ceil(((maxGx + 1) * canvas.width) / MASK_RES)
+      const bottom = Math.ceil(((maxGy + 1) * canvas.height) / MASK_RES)
+
       window.api.reportMask({
         res: MASK_RES,
         cells,
-        bbox: { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 }
+        bbox: { x, y, w: right - x, h: bottom - y }
       })
     }
 
@@ -585,6 +591,8 @@ export default function PetCanvas(): JSX.Element {
           fadeActive = true
         }
         drawnClipId = clipId
+        // drop_land 首帧真正开始绘制，才通知主进程开始悬停与下落，避免窗口位移跑在动画前面
+        if (clipId === 'drop_land') window.api.dropStart()
         if (clipId === 'walk_loop') walkCycleSeen = 0
         if (clipId === 'jump_loop') {
           jumpCycleSeen = 0
@@ -644,6 +652,9 @@ export default function PetCanvas(): JSX.Element {
       } else {
         const frame = player.currentFrame
         if (frame) {
+          // 帧按当前缩放解码，尺寸可能小于 300×300，绘制时统一还原到 300 坐标系
+          const src = frame as ImageBitmap
+          const fsY = src.height / CANVAS_SIZE.height
           // 镜像以「正在绘制的片段」为准。掉头片段跨越了朝向翻转：段内用开始时的朝向，
           // 翻转后的那一帧才不会把末帧镜像成反方向；片段切换是异步的，
           // 翻转当帧仍在画 walk_turn，因此不能只看编排器的当前朝向。
@@ -667,7 +678,7 @@ export default function PetCanvas(): JSX.Element {
             ctx.scale(-1, 1)
           }
           if (bend === 0) {
-            ctx.drawImage(frame, 0, 0)
+            ctx.drawImage(frame, 0, 0, CANVAS_SIZE.width, CANVAS_SIZE.height)
           } else {
             // 柔性弯曲：按横切片绘制，越靠近脚底横移越多（按 d² 增长），
             // 头部只跟随刚体旋转，身体和腿被甩在后面
@@ -678,7 +689,17 @@ export default function PetCanvas(): JSX.Element {
               const h = Math.min(SWAY_SLICE_H, CANVAS_SIZE.height - y)
               const d = Math.max(0, (y + h / 2 - top) / span)
               const off = bend * d * d * dir
-              ctx.drawImage(frame, 0, y, CANVAS_SIZE.width, h, off, y, CANVAS_SIZE.width, h)
+              ctx.drawImage(
+                frame,
+                0,
+                y * fsY,
+                src.width,
+                h * fsY,
+                off,
+                y,
+                CANVAS_SIZE.width,
+                h
+              )
             }
           }
           ctx.restore()
@@ -880,6 +901,11 @@ export default function PetCanvas(): JSX.Element {
 
     const offScale = window.api.onScale((s) => {
       scaleRef.current = s
+      spriteSource.setRenderScale(s)
+      // 按新尺寸重新解码当前片段；旧尺寸的缓存仍能正常绘制，会在 LRU 里自然换掉
+      if (player.clipId) void player.play(player.clipId)
+      // 缩放会解除常驻，等缩放手势停下再按新尺寸预热拖拽片段
+      warmDragClips(SCALE_REWARM_DELAY_MS)
       // 画布尺寸变化后旧快照尺寸不再匹配，直接丢弃
       fadeActive = false
       setScale(s)
@@ -898,8 +924,8 @@ export default function PetCanvas(): JSX.Element {
       offApplePos()
       offAppleExpired()
       loco?.dispose()
+      if (warmTimer) clearTimeout(warmTimer)
       window.api.cancelJump()
-      clearTimeout(preloadTimer)
       cancelAnimationFrame(raf)
       spriteSource.dispose()
     }

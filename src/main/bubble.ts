@@ -3,6 +3,8 @@ import { join } from 'path'
 
 const BUBBLE_W = 320
 const BUBBLE_H = 180
+/** 气泡隐藏后窗口常驻多久再销毁；期间再次弹出可直接复用 */
+const IDLE_DESTROY_MS = 10000
 
 function clamp(v: number, min: number, max: number): number {
   return Math.min(Math.max(v, min), max)
@@ -15,10 +17,12 @@ function clamp(v: number, min: number, max: number): number {
 export class BubbleWindow {
   private win: BrowserWindow | null = null
   private hideTimer: NodeJS.Timeout | null = null
+  private destroyTimer: NodeJS.Timeout | null = null
 
   show(anchor: BrowserWindow, text: string, durationMs = 6000): void {
     const win = this.ensure()
     this.clearTimer()
+    this.clearDestroyTimer()
 
     const devUrl = process.env['ELECTRON_RENDERER_URL']
     const loaded = devUrl
@@ -37,12 +41,31 @@ export class BubbleWindow {
   hide(): void {
     this.clearTimer()
     if (this.win && !this.win.isDestroyed()) this.win.hide()
+    this.scheduleDestroy()
   }
 
   dispose(): void {
     this.clearTimer()
+    this.clearDestroyTimer()
     if (this.win && !this.win.isDestroyed()) this.win.destroy()
     this.win = null
+  }
+
+  /** 隐藏后延迟销毁窗口，释放常驻的渲染进程；再次弹出时按需重建 */
+  private scheduleDestroy(): void {
+    this.clearDestroyTimer()
+    this.destroyTimer = setTimeout(() => {
+      this.destroyTimer = null
+      if (this.win && !this.win.isDestroyed()) this.win.destroy()
+      this.win = null
+    }, IDLE_DESTROY_MS)
+  }
+
+  private clearDestroyTimer(): void {
+    if (this.destroyTimer) {
+      clearTimeout(this.destroyTimer)
+      this.destroyTimer = null
+    }
   }
 
   private ensure(): BrowserWindow {

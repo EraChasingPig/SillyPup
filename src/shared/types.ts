@@ -152,6 +152,8 @@ export const IPC_CHANNELS = {
   JUMP_MOVE: 'pet:jump-move',
   /** 渲染层 → 主进程：取消跳跃位移（被打断或已落地） */
   JUMP_CANCEL: 'pet:jump-cancel',
+  /** 渲染层 → 主进程：drop_land 已开播，开始松手后的悬停与下落 */
+  DROP_START: 'pet:drop-start',
   /** 主进程 → 渲染层：右键菜单召唤苹果，开始一轮寻找 */
   APPLE_SUMMON: 'apple:summon',
   /** 主进程 → 渲染层：苹果当前位置（屏幕 DIP，中心 x + 底边 y） */

@@ -122,6 +122,11 @@ const api = {
     ipcRenderer.send(IPC_CHANNELS.JUMP_CANCEL)
   },
 
+  /** 渲染层 → 主进程：drop_land 已开播，主进程再开始悬停与下落 */
+  dropStart: (): void => {
+    ipcRenderer.send(IPC_CHANNELS.DROP_START)
+  },
+
   /** 主进程 → 渲染层：右键菜单召唤苹果，开始一轮寻找 */
   onAppleSummon: (cb: () => void): (() => void) => {
     const handler = (): void => cb()
