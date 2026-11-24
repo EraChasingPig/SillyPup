@@ -21,7 +21,8 @@ export default defineConfig({
         input: {
           index: resolve('src/renderer/index.html'),
           bubble: resolve('src/renderer/bubble.html'),
-          prompt: resolve('src/renderer/prompt.html')
+          prompt: resolve('src/renderer/prompt.html'),
+          apple: resolve('src/renderer/apple.html')
         }
       }
     }

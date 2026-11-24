@@ -6,6 +6,7 @@ import { startInteraction } from './interaction'
 import { HitMaskStore } from './hitMask'
 import { PomodoroService } from './pomodoro'
 import { BubbleWindow } from './bubble'
+import { AppleWindow } from './appleWindow'
 import { popupContextMenu } from './contextMenu'
 import { promptMinutes } from './prompt'
 import { startKeyPoller } from './keyPoller'
@@ -19,6 +20,7 @@ import { setupLogger, logInfo } from './logger'
 import { applyAutoLaunch } from './autoLaunch'
 import { IPC_CHANNELS } from '../shared/types'
 import type {
+  ApplePos,
   FocusState,
   HitMask,
   JumpMovePlan,
@@ -54,6 +56,7 @@ if (!gotLock) {
   let pomodoro: PomodoroService | null = null
   let mover: Mover | null = null
   let jumpMover: JumpMover | null = null
+  let appleWindow: AppleWindow | null = null
   let scaleAnchor: { x: number; y: number } | null = null
 
   const maskStore = new HitMaskStore()
@@ -79,6 +82,10 @@ if (!gotLock) {
     mover = walkMover
     const verticalMover = createJumpMover(petWindow)
     jumpMover = verticalMover
+    const apple = new AppleWindow(petWindow, () => config.scale)
+    appleWindow = apple
+    // 空闲时先把苹果页加载好，第一次召唤不出现空白
+    setTimeout(() => apple.preload(), 2500)
     tray = createTray(petWindow, config, (cmd) => {
       petWindow.webContents.send(IPC_CHANNELS.LOCOMOTION, cmd)
     })
@@ -97,7 +104,8 @@ if (!gotLock) {
 
     const focusState: FocusState = {
       focusMode: config.focusMode,
-      keyBubble: config.keyBubble
+      keyBubble: config.keyBubble,
+      showState: config.showState
     }
     const broadcastFocusState = (): void => {
       petWindow.webContents.send(IPC_CHANNELS.FOCUS_STATE, focusState)
@@ -138,21 +146,22 @@ if (!gotLock) {
               service.start(minutes)
             })
           },
-          focusMode: focusState.focusMode,
           keyBubble: focusState.keyBubble,
-          setFocusMode: (on) => {
-            focusState.focusMode = on
-            config.focusMode = on
-            saveConfig(config)
-            cursorPoller.setEnabled(on)
-            broadcastFocusState()
-          },
+          showState: focusState.showState,
           setKeyBubble: (on) => {
             focusState.keyBubble = on
             config.keyBubble = on
             saveConfig(config)
             broadcastFocusState()
-          }
+          },
+          setShowState: (on) => {
+            focusState.showState = on
+            config.showState = on
+            saveConfig(config)
+            broadcastFocusState()
+          },
+          onSummonApple: () => apple.summon(),
+          isAppleRoundActive: () => apple.isRoundActive
         })
       },
       {
@@ -197,6 +206,17 @@ if (!gotLock) {
       verticalMover.cancel()
     })
 
+    // 苹果：渲染层负责规划与到点判定，主进程只搬窗口
+    ipcMain.on(IPC_CHANNELS.APPLE_PIN, (_event, pos: ApplePos) => {
+      apple.pin(pos)
+    })
+    ipcMain.on(IPC_CHANNELS.APPLE_FADE_OUT, () => {
+      apple.fadeOut()
+    })
+    ipcMain.on(IPC_CHANNELS.APPLE_END, () => {
+      apple.end()
+    })
+
     if (process.env['ELECTRON_RENDERER_URL']) {
       petWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
     } else {
@@ -219,5 +239,6 @@ if (!gotLock) {
     jumpMover?.dispose()
     pomodoro?.dispose()
     bubble.dispose()
+    appleWindow?.dispose()
   })
 }

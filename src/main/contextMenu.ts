@@ -9,12 +9,16 @@ export interface ContextMenuDeps {
   stop: () => void
   /** 打开键盘输入窗口，自定义 1~999 分钟的时长 */
   promptCustom: () => void
-  /** 当前 Focus 模式开关状态 */
-  focusMode: boolean
   /** 当前按键气泡开关状态 */
   keyBubble: boolean
-  setFocusMode: (on: boolean) => void
+  /** 当前状态标注开关状态 */
+  showState: boolean
   setKeyBubble: (on: boolean) => void
+  setShowState: (on: boolean) => void
+  /** 召唤一个跟随光标的苹果，开始一轮寻找 */
+  onSummonApple: () => void
+  /** 本轮找苹果是否还没结束（未结束则菜单项置灰） */
+  isAppleRoundActive: () => boolean
 }
 
 /**
@@ -46,16 +50,22 @@ export function popupContextMenu(
     },
     { type: 'separator' },
     {
-      label: 'Focus 模式',
-      type: 'checkbox',
-      checked: deps.focusMode,
-      click: (item: Electron.MenuItem) => deps.setFocusMode(item.checked)
+      label: '获得苹果',
+      enabled: !deps.isAppleRoundActive(),
+      click: () => deps.onSummonApple()
     },
+    { type: 'separator' },
     {
       label: '按键气泡',
       type: 'checkbox',
       checked: deps.keyBubble,
       click: (item: Electron.MenuItem) => deps.setKeyBubble(item.checked)
+    },
+    {
+      label: '显示状态标注',
+      type: 'checkbox',
+      checked: deps.showState,
+      click: (item: Electron.MenuItem) => deps.setShowState(item.checked)
     },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() }

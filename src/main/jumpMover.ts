@@ -55,7 +55,15 @@ export function createJumpMover(win: BrowserWindow): JumpMover {
     }
 
     const sign = plan.dir === 'up' ? -1 : 1
-    const y = Math.min(maxY, Math.max(minY, Math.round(anchorY + sign * offset)))
+    const rawY = Math.round(anchorY + sign * offset)
+    // 只钳制运动方向，不强行纠正起点：
+    // 小狗贴在工作区底边外（例如贴着任务栏）时，起点 anchorY 会大于 maxY，
+    // 若这里无条件夹到 maxY，jump_loop 第一帧就会把窗口瞬间上移，表现为
+    // jump_prepare → jump_loop 之间瞬移。顶部向下跳同理。
+    const y =
+      sign < 0
+        ? Math.max(rawY, Math.min(minY, anchorY))
+        : Math.min(rawY, Math.max(maxY, anchorY))
     win.setPosition(anchorX, y)
 
     const lastEnd = plan.hops[plan.hops.length - 1]?.endMs ?? 0

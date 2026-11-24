@@ -30,7 +30,9 @@ export const STATE_CLIP: Record<PetState, string> = {
   // 原地跳跃：起跳前 → 三次循环跳 → 落地回待机
   JumpPrepare: 'jump_prepare',
   JumpLoop: 'jump_loop',
-  JumpLand: 'jump_land'
+  JumpLand: 'jump_land',
+  // 找苹果：站立思考，由规划器逐段发起走 / 跳
+  AppleSeek: 'idle_breath'
 }
 
 /** 坐姿讨食系列状态（正面朝观众，且都算「有互动」） */
@@ -96,6 +98,12 @@ export class PetFSM {
   private state: PetState = 'Idle'
   private mode: PetMode = 'normal'
   private cooldownUntil = 0
+  /** 行走结束后回到哪个状态；找苹果期间为 AppleSeek */
+  private walkReturn: PetState = 'Idle'
+  /** 跳跃结束后回到哪个状态；找苹果期间为 AppleSeek */
+  private jumpReturn: PetState = 'Idle'
+  /** 本轮坐姿是因为苹果到达触发的，SitEnter 播完要接着吃苹果 */
+  private appleEatPending = false
 
   constructor(
     private readonly onTransition: (from: PetState, to: PetState, e: PetEvent) => void
@@ -159,16 +167,24 @@ export class PetFSM {
           'PointShow',
           'JumpPrepare',
           'JumpLoop',
-          'JumpLand'
+          'JumpLand',
+          'AppleSeek'
         ]
         return busy.includes(state) ? null : 'Interact'
       }
 
       case 'WALK_START':
-        return state === 'Idle' ? 'Roam' : null
+        // 找苹果时也会发起行走，走完要回到 AppleSeek 继续规划
+        if (state !== 'Idle' && state !== 'AppleSeek') return null
+        this.walkReturn = e.returnTo ?? 'Idle'
+        return 'Roam'
 
-      case 'WALK_END':
-        return state === 'Roam' ? 'Idle' : null
+      case 'WALK_END': {
+        if (state !== 'Roam') return null
+        const to = this.walkReturn
+        this.walkReturn = 'Idle'
+        return to
+      }
 
       case 'SLEEP':
         // 只在真正的待机循环里入睡；正在播日常动作等一次性动画时等它播完，
@@ -207,8 +223,47 @@ export class PetFSM {
         return state === 'Idle' ? 'PointPeek' : null
 
       case 'JUMP_START':
-        // 只在待机时起跳；托盘指令与日常池共用这条入口
-        return state === 'Idle' ? 'JumpPrepare' : null
+        // 只在待机或找苹果的思考间隙起跳；托盘指令与日常池共用这条入口
+        if (state !== 'Idle' && state !== 'AppleSeek') return null
+        this.jumpReturn = e.returnTo ?? 'Idle'
+        return 'JumpPrepare'
+
+      case 'APPLE_SUMMON':
+        // 苹果召唤打断日常行为（含散步、坐着等苹果），但拎起/作业/跳跃途中忽略
+        if (
+          state === 'AppleSeek' ||
+          state === 'Grabbed' ||
+          state === 'Dragging' ||
+          state === 'Dropped' ||
+          isHomeworkState(state) ||
+          isJumpState(state)
+        ) {
+          return null
+        }
+        return 'AppleSeek'
+
+      case 'APPLE_ARRIVED':
+        if (state !== 'AppleSeek') return null
+        this.appleEatPending = true
+        return 'SitEnter'
+
+      case 'APPLE_CANCEL':
+        // 中断找苹果：无论当前在思考、走、跳还是坐下，都直接回待机
+        if (state === 'AppleSeek') return 'Idle'
+        if (state === 'Roam' && this.walkReturn === 'AppleSeek') {
+          this.walkReturn = 'Idle'
+          return 'Idle'
+        }
+        if (isJumpState(state) && this.jumpReturn === 'AppleSeek') {
+          this.jumpReturn = 'Idle'
+          this.appleEatPending = false
+          return 'Idle'
+        }
+        if (state === 'SitEnter' && this.appleEatPending) {
+          this.appleEatPending = false
+          return 'Idle'
+        }
+        return null
 
       case 'DRAG_END':
         return state === 'Grabbed' || state === 'Dragging' ? 'Dropped' : null
@@ -227,6 +282,11 @@ export class PetFSM {
           case 'HomeworkDone':
             return 'Idle'
           case 'SitEnter':
+            // 找苹果到点坐下的，播完直接开吃；普通讨食继续发呆
+            if (this.appleEatPending) {
+              this.appleEatPending = false
+              return 'SitEat'
+            }
             return 'SitIdle'
           case 'SitEat':
           case 'SitAngry':
@@ -237,10 +297,11 @@ export class PetFSM {
             return 'Idle'
           case 'JumpPrepare':
             return 'JumpLoop'
-          case 'JumpLoop':
-            return 'JumpLand'
-          case 'JumpLand':
-            return 'Idle'
+          case 'JumpLand': {
+            const to = this.jumpReturn
+            this.jumpReturn = 'Idle'
+            return to
+          }
           case 'Wake':
           case 'Interact':
           case 'Action':
@@ -248,6 +309,10 @@ export class PetFSM {
           default:
             return null
         }
+
+      case 'JUMP_LAND':
+        // jump_loop 循环播放，由编排器决定落地的时机
+        return state === 'JumpLoop' ? 'JumpLand' : null
 
       case 'IDLE_TIMEOUT':
         // Action 也接受超时回落，用于无交互时的往返演示

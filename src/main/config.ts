@@ -10,6 +10,8 @@ export interface AppConfig {
   focusMode: boolean
   /** 全局按键气泡开关 */
   keyBubble: boolean
+  /** 左上角状态标注开关（默认隐藏） */
+  showState: boolean
   /** 开机自启（写入 HKCU\...\Run） */
   autoLaunch: boolean
   /** 桌宠缩放比例（1 为基准尺寸） */
@@ -20,6 +22,7 @@ const DEFAULTS: AppConfig = {
   pomodoroMinutes: 25,
   focusMode: false,
   keyBubble: true,
+  showState: false,
   autoLaunch: false,
   scale: 1
 }
@@ -50,8 +53,10 @@ export function loadConfig(): AppConfig {
           typeof raw.pomodoroMinutes === 'number' && raw.pomodoroMinutes > 0
             ? raw.pomodoroMinutes
             : DEFAULTS.pomodoroMinutes,
-        focusMode: typeof raw.focusMode === 'boolean' ? raw.focusMode : DEFAULTS.focusMode,
+        // 菜单入口已移除，旧配置若残留 true 会卡在 Focus 场景且无法关闭，启动时一律重置
+        focusMode: false,
         keyBubble: typeof raw.keyBubble === 'boolean' ? raw.keyBubble : DEFAULTS.keyBubble,
+        showState: typeof raw.showState === 'boolean' ? raw.showState : DEFAULTS.showState,
         autoLaunch: typeof raw.autoLaunch === 'boolean' ? raw.autoLaunch : DEFAULTS.autoLaunch,
         scale: clampScale(raw.scale)
       }

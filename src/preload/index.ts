@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS } from '../shared/types'
 import type {
+  ApplePos,
   CursorPayload,
   FocusState,
   HitMask,
@@ -119,6 +120,48 @@ const api = {
   /** 渲染层 → 主进程：取消跳跃位移（被打断或已落地） */
   cancelJump: (): void => {
     ipcRenderer.send(IPC_CHANNELS.JUMP_CANCEL)
+  },
+
+  /** 主进程 → 渲染层：右键菜单召唤苹果，开始一轮寻找 */
+  onAppleSummon: (cb: () => void): (() => void) => {
+    const handler = (): void => cb()
+    ipcRenderer.on(IPC_CHANNELS.APPLE_SUMMON, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.APPLE_SUMMON, handler)
+    }
+  },
+
+  /** 主进程 → 渲染层：苹果当前位置（屏幕 DIP） */
+  onApplePos: (cb: (p: ApplePos) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, p: ApplePos): void => cb(p)
+    ipcRenderer.on(IPC_CHANNELS.APPLE_POS, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.APPLE_POS, handler)
+    }
+  },
+
+  /** 主进程 → 渲染层：苹果轮次超时 */
+  onAppleExpired: (cb: () => void): (() => void) => {
+    const handler = (): void => cb()
+    ipcRenderer.on(IPC_CHANNELS.APPLE_EXPIRED, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.APPLE_EXPIRED, handler)
+    }
+  },
+
+  /** 渲染层 → 主进程：到点后钉住苹果 */
+  applePin: (p: ApplePos): void => {
+    ipcRenderer.send(IPC_CHANNELS.APPLE_PIN, p)
+  },
+
+  /** 渲染层 → 主进程：sit_enter 末尾淡出苹果 */
+  appleFadeOut: (): void => {
+    ipcRenderer.send(IPC_CHANNELS.APPLE_FADE_OUT)
+  },
+
+  /** 渲染层 → 主进程：本轮结束 / 中断，收起苹果 */
+  appleEnd: (): void => {
+    ipcRenderer.send(IPC_CHANNELS.APPLE_END)
   }
 }
 

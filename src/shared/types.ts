@@ -22,6 +22,27 @@ export const PET_SCALE_MAX = 1.6
  */
 export const PET_GRAB_ANCHOR: Point = { x: 150, y: 66 }
 
+/**
+ * 角色站立时画面可见内容的上沿（300×300 画布坐标，实测 alpha 上边界）。
+ * 苹果到达判定与可达带都以「小狗可见上沿」为基准，而不是窗口上边。
+ */
+export const PET_VISIBLE_TOP = 81
+
+/** 苹果图标在缩放 1 时的尺寸（由 sit_eat_happy 素材抠出） */
+export const APPLE_ICON_SIZE: Size = { width: 52, height: 57 }
+/** 苹果中心相对光标的纵向偏移（缩放 1 时的 DIP） */
+export const APPLE_FOLLOW_OFFSET_Y = 18
+/** 到点后苹果底边相对小狗窗口顶部的 y（坐姿反推，缩放 1 时报 30） */
+export const APPLE_PIN_BOTTOM_Y = 30
+/** 到点后苹果底部中心相对小狗窗口左侧的 x：朝左 / 朝右（镜像） */
+export const APPLE_PIN_CX_LEFT = 137
+export const APPLE_PIN_CX_RIGHT = 163
+/** 到点判定容差（DIP）：水平看窗口中心，垂直看苹果底边与小狗可见上沿 */
+export const APPLE_ARRIVE_DX = 55
+export const APPLE_ARRIVE_DY = 75
+/** 苹果轮次超时时间：超过则自动放弃 */
+export const APPLE_ROUND_TIMEOUT_MS = 120000
+
 // 桌宠模式：normal 为日常形态，focus 为「敲键盘」形态
 export type PetMode = 'normal' | 'focus'
 
@@ -50,6 +71,7 @@ export type PetState =
   | 'JumpPrepare'
   | 'JumpLoop'
   | 'JumpLand'
+  | 'AppleSeek'
 
 /** 跳跃方向；inPlace 表示原地跳一轮，不移动窗口 */
 export type JumpDirection = 'up' | 'down' | 'inPlace'
@@ -66,12 +88,18 @@ export type PetEvent =
   | { t: 'POMO_START' }
   | { t: 'POMO_END' }
   | { t: 'DOZE' }
-  | { t: 'WALK_START' }
+  /** returnTo：走完后回到哪个状态；缺省回 Idle（托盘散步、日常行走） */
+  | { t: 'WALK_START'; returnTo?: PetState }
   | { t: 'WALK_END' }
   | { t: 'SIT_TRIGGER' }
   | { t: 'SIT_TIMEOUT' }
   | { t: 'POINT_TRIGGER' }
-  | { t: 'JUMP_START'; dir: JumpDirection }
+  /** stepDip：每跳的窗口位移（已按缩放换算，DIP）；returnTo 缺省回 Idle */
+  | { t: 'JUMP_START'; dir: JumpDirection; stepDip?: number; returnTo?: PetState }
+  | { t: 'JUMP_LAND' }
+  | { t: 'APPLE_SUMMON' }
+  | { t: 'APPLE_ARRIVED' }
+  | { t: 'APPLE_CANCEL' }
   | { t: 'MODE_CHANGED'; mode: PetMode }
 
 /** 主进程 → 渲染层 的输入事件子集 */
@@ -123,8 +151,26 @@ export const IPC_CHANNELS = {
   /** 渲染层 → 主进程：下发一轮跳跃的窗口垂直位移时间表 */
   JUMP_MOVE: 'pet:jump-move',
   /** 渲染层 → 主进程：取消跳跃位移（被打断或已落地） */
-  JUMP_CANCEL: 'pet:jump-cancel'
+  JUMP_CANCEL: 'pet:jump-cancel',
+  /** 主进程 → 渲染层：右键菜单召唤苹果，开始一轮寻找 */
+  APPLE_SUMMON: 'apple:summon',
+  /** 主进程 → 渲染层：苹果当前位置（屏幕 DIP，中心 x + 底边 y） */
+  APPLE_POS: 'apple:pos',
+  /** 主进程 → 渲染层：苹果轮次超时，已自动收起 */
+  APPLE_EXPIRED: 'apple:expired',
+  /** 渲染层 → 主进程：到点后把苹果钉在指定位置（屏幕 DIP） */
+  APPLE_PIN: 'apple:pin',
+  /** 渲染层 → 主进程：sit_enter 末尾让苹果淡出 */
+  APPLE_FADE_OUT: 'apple:fade-out',
+  /** 渲染层 → 主进程：本轮结束 / 中断，立刻收起苹果 */
+  APPLE_END: 'apple:end'
 } as const
+
+/** 苹果位置：底部中心坐标（屏幕 DIP） */
+export interface ApplePos {
+  cx: number
+  bottom: number
+}
 
 /** 跳跃时间表中的一次腾空区间，单位毫秒，相对 jump_loop 开始播放 */
 export interface JumpHop {
@@ -164,6 +210,8 @@ export const POMODORO_MAX_MINUTES = 999
 export interface FocusState {
   focusMode: boolean
   keyBubble: boolean
+  /** 左上角状态标注是否显示 */
+  showState: boolean
 }
 
 /** 一次轮询里检测到的新按键（已去重、已限流） */

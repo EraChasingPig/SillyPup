@@ -5,16 +5,27 @@ import {
   PetFSM,
   STATE_CLIP,
   isHomeworkState,
-  isSitState,
-  isPointState,
-  isJumpState,
   pickDailyItem
 } from '../fsm/machine'
 import { Locomotion, type Facing } from '../fsm/locomotion'
 import { drawFocusScene, mapToPad, padCenter, smoothHand } from './focusScene'
 import { Sway } from './sway'
-import { PET_GRAB_ANCHOR } from '../../../shared/types'
-import type { CursorPayload, JumpDirection, PetEvent, PetState } from '../../../shared/types'
+import {
+  APPLE_ARRIVE_DX,
+  APPLE_ARRIVE_DY,
+  APPLE_PIN_BOTTOM_Y,
+  APPLE_PIN_CX_LEFT,
+  APPLE_PIN_CX_RIGHT,
+  PET_GRAB_ANCHOR,
+  PET_VISIBLE_TOP
+} from '../../../shared/types'
+import type {
+  ApplePos,
+  CursorPayload,
+  JumpDirection,
+  PetEvent,
+  PetState
+} from '../../../shared/types'
 
 /** 掩码降采样分辨率：64×64 足够判断光标是否压在身上 */
 const MASK_RES = 64
@@ -30,8 +41,10 @@ const POINT_CHANCE = 0.15
 const SPECIAL_COOLDOWN_MS = 30000
 /** 坐着等苹果的忍耐时长，超时就生气撒泼 */
 const SIT_GIVEUP_MS = 60000
-/** 多久没有任何操作就去睡觉 */
-const SLEEP_AFTER_MS = 180000
+/** 多久没有任何用户操作就去睡觉 */
+const SLEEP_AFTER_MS = 300000
+/** 连续睡多久后自动起床 */
+const SLEEP_WAKE_MS = 300000
 /** 按键气泡显示时长（与 .stage-key 的动画时长一致） */
 const KEY_BUBBLE_MS = 900
 /** 敲键盘动作持续时长 */
@@ -49,6 +62,14 @@ const JUMP_HOP_AIR_FRAMES: ReadonlyArray<readonly [number, number]> = [
   [65, 81]
 ]
 const JUMP_LOOP_FPS = 24
+/** sit_enter 末尾提前多久淡出苹果 */
+const SIT_APPLE_FADE_MS = 500
+/** 一轮跳跃后纵向距离改善不足该值，判定竖直方向走不通 */
+const SEEK_MIN_GAIN = 10
+/** 找苹果时 jump_loop 最多串联的圈数，防止贴边时无限空跳 */
+const JUMP_MAX_CHAIN_LOOPS = 8
+/** 串联期间允许苹果横向偏移超出到达容差的余量，超出就先落地走过去 */
+const JUMP_CHAIN_DX_SLACK = 20
 
 function formatRemain(ms: number): string {
   const total = Math.ceil(ms / 1000)
@@ -66,6 +87,7 @@ export default function PetCanvas(): JSX.Element {
   const [state, setState] = useState<PetState>('Idle')
   const [remainMs, setRemainMs] = useState(0)
   const [focusMode, setFocusMode] = useState(false)
+  const [showState, setShowState] = useState(false)
   const [scale, setScale] = useState(1)
   const [keyLabel, setKeyLabel] = useState<{ label: string; seq: number } | null>(null)
   const pomodoroRunning = useRef(false)
@@ -99,6 +121,9 @@ export default function PetCanvas(): JSX.Element {
     let pendingWalk: Facing | null = null
     /** 当前 loop 已判定到的循环序号，用于数满一圈 */
     let walkCycleSeen = 0
+    /** jump_loop 已判定到的循环序号与本次飞行已完成的圈数 */
+    let jumpCycleSeen = 0
+    let jumpLoopCount = 0
     /** 悬挂摆动：按窗口横向速度/加速度给画面加旋转，仅拎起与落地回正期间生效 */
     const sway = new Sway()
     let swayHeld = false
@@ -114,12 +139,32 @@ export default function PetCanvas(): JSX.Element {
 
     let stateEnteredAt = performance.now()
     let lastInputAt = performance.now()
+    /** 进入睡眠的时刻，用于睡满 5 分钟后自动起床 */
+    let sleepAt = 0
     /** 本轮日常互动抽中的条目，进入 Action / Interact 时用于播放 */
     let pendingActionClip: string | null = null
     /** 上一次抽中的日常条目，包含 'jump'，用于避免连续重复 */
     let lastDailyItem: string | null = null
     /** 本轮跳跃的方向；inPlace 表示原地跳、不移动窗口 */
     let jumpDir: JumpDirection = 'inPlace'
+    /** 本轮跳跃每跳的窗口位移（DIP）；找苹果时动态计算，日常跳为 null */
+    let jumpStepDip: number | null = null
+    /** 本次跳跃是否属于找苹果（只有找苹果才允许 jump_loop 串联） */
+    let jumpSeek = false
+    /** 找苹果轮次是否进行中（召唤 → sit_eat_happy 播完） */
+    let appleRoundActive = false
+    /** 是否已收到苹果当前位置，收到后规划器才开始行动 */
+    let applePosReady = false
+    /** 苹果最新位置（屏幕 DIP：底部中心） */
+    let applePos: ApplePos = { cx: 0, bottom: 0 }
+    /** 当前行走段是否属于找苹果 */
+    let seekWalk = false
+    /** 竖直方向判定走不通，本轮不再跳 */
+    let seekStuckY = false
+    /** 起跳前的纵向距离，落地后用于判断是否卡住 */
+    let jumpDyBefore: number | null = null
+    /** sit_enter 末尾的苹果淡出是否已发出 */
+    let appleFadeSent = false
     /** 上一次坐姿/指屏幕的触发时间，用于 30 秒特殊行为冷却 */
     let lastSpecialAt = Number.NEGATIVE_INFINITY
     /** 下一次插入打瞌睡的时刻（4~6 个作业循环后） */
@@ -153,22 +198,44 @@ export default function PetCanvas(): JSX.Element {
       return null
     }
 
-    /** 进入跳跃循环后，按素材腾空帧区间把窗口位移时间表发给主进程 */
-    const startJumpMove = (): void => {
-      if (jumpDir === 'inPlace') return
-      const stepDip = (jumpDir === 'up' ? JUMP_STEP_UP : JUMP_STEP_DOWN) * scaleRef.current
+    /** 按素材腾空帧区间把一圈窗口位移时间表发给主进程 */
+    const sendJumpMove = (dir: 'up' | 'down', stepDip: number): void => {
       const hops = JUMP_HOP_AIR_FRAMES.map(([start, end]) => ({
         startMs: Math.round((start / JUMP_LOOP_FPS) * 1000),
         endMs: Math.round((end / JUMP_LOOP_FPS) * 1000)
       }))
-      window.api.jumpMove({ dir: jumpDir, stepDip, hops })
+      window.api.jumpMove({ dir, stepDip, hops })
+    }
+
+    /** 进入跳跃循环后，按素材腾空帧区间把窗口位移时间表发给主进程 */
+    const startJumpMove = (): void => {
+      if (jumpDir === 'inPlace') return
+      const dir: 'up' | 'down' = jumpDir === 'up' ? 'up' : 'down'
+      const base = (dir === 'up' ? JUMP_STEP_UP : JUMP_STEP_DOWN) * scaleRef.current
+      // 找苹果时按剩余距离动态均摊；日常跳按固定挡位
+      const stepDip = jumpStepDip ?? base
+      jumpStepDip = null
+      sendJumpMove(dir, stepDip)
     }
 
     const fsm = new PetFSM((from, to, e) => {
       stateEnteredAt = performance.now()
       setState(to)
       // 离开跳跃循环时立刻停掉窗口位移，拖拽打断时尤其重要
-      if (from === 'JumpLoop') window.api.cancelJump()
+      if (from === 'JumpLoop') {
+        window.api.cancelJump()
+        jumpSeek = false
+      }
+      // 吃苹果动画播完，本轮找苹果才算真正结束
+      if (from === 'SitEat' && to === 'Idle') endAppleRound()
+      // 找苹果的思考间隙不保留行走状态；被召唤打断的散步就地停下
+      if (to === 'AppleSeek') {
+        seekWalk = false
+        if (e.t === 'APPLE_SUMMON') {
+          loco?.abort()
+          window.api.cancelJump()
+        }
+      }
       // 坐姿、指屏幕与整轮跳跃共享 30 秒大动作冷却
       if (to === 'SitEnter' || to === 'PointPeek' || to === 'JumpPrepare') {
         lastSpecialAt = performance.now()
@@ -193,6 +260,7 @@ export default function PetCanvas(): JSX.Element {
       }
       // 入睡片段只有 4 秒，进 Sleepy 时先把循环和起床片段预加载好
       if (to === 'Sleepy') {
+        sleepAt = performance.now()
         void spriteSource.load('sleep_loop')
         void spriteSource.load('sleep_wake')
       }
@@ -215,6 +283,7 @@ export default function PetCanvas(): JSX.Element {
       // 坐姿素材帧数多，趁坐下和发呆的时间提前解码下一段
       if (to === 'SitEnter') {
         void spriteSource.load('sit_idle')
+        void spriteSource.load('sit_eat_happy')
       }
       if (to === 'SitIdle') {
         void spriteSource.load('sit_eat_happy')
@@ -227,6 +296,8 @@ export default function PetCanvas(): JSX.Element {
       // 起跳前有 4 秒，把循环和落地两段都解码好
       if (to === 'JumpPrepare') {
         jumpDir = e.t === 'JUMP_START' ? e.dir : 'inPlace'
+        jumpStepDip = e.t === 'JUMP_START' ? (e.stepDip ?? null) : null
+        jumpSeek = e.t === 'JUMP_START' && e.returnTo === 'AppleSeek'
         void spriteSource.load('jump_loop')
         void spriteSource.load('jump_land')
       }
@@ -260,6 +331,155 @@ export default function PetCanvas(): JSX.Element {
       // 专注模式不跳；只在待机时起跳，跳跃期间忽略重复指令
       if (focusModeRef.current || fsm.current !== 'Idle') return
       fsm.send({ t: 'JUMP_START', dir })
+    }
+
+    /** 苹果相对小狗的偏差：dx 按窗口中心，dy 按苹果底边与小狗可见上沿 */
+    const appleDelta = (): { dx: number; dy: number } => ({
+      dx: applePos.cx - (window.screenX + window.innerWidth / 2),
+      dy: applePos.bottom - (window.screenY + PET_VISIBLE_TOP * scaleRef.current)
+    })
+
+    /**
+     * jump_loop 每播完一圈调用一次。
+     * 找苹果时若还在远离目标且同方向仍有进展，就无缝接下一圈；
+     * 否则发 JUMP_LAND 进入落地段。日常跳与托盘跳只播一圈。
+     */
+    const onJumpCycleEnd = (): void => {
+      jumpLoopCount += 1
+      if (
+        jumpSeek &&
+        appleRoundActive &&
+        jumpDir !== 'inPlace' &&
+        jumpLoopCount < JUMP_MAX_CHAIN_LOOPS
+      ) {
+        const { dx, dy } = appleDelta()
+        const sameDir = jumpDir === 'up' ? dy < 0 : dy > 0
+        const far = Math.abs(dy) > APPLE_ARRIVE_DY
+        const gain =
+          jumpDyBefore === null
+            ? Number.POSITIVE_INFINITY
+            : Math.abs(jumpDyBefore) - Math.abs(dy)
+        if (
+          far &&
+          sameDir &&
+          gain >= SEEK_MIN_GAIN &&
+          Math.abs(dx) <= APPLE_ARRIVE_DX + JUMP_CHAIN_DX_SLACK
+        ) {
+          // 继续下一圈：以当前窗口位置为新锚点，按剩余距离重算每跳步长
+          jumpDyBefore = dy
+          const dir: 'up' | 'down' = jumpDir === 'up' ? 'up' : 'down'
+          const base = (dir === 'up' ? JUMP_STEP_UP : JUMP_STEP_DOWN) * scaleRef.current
+          sendJumpMove(dir, Math.max(1, Math.min(Math.abs(dy) / 3, base)))
+          return
+        }
+        // 同方向连跳却没有进展，说明已经贴到工作区边缘
+        if (far && sameDir && gain < SEEK_MIN_GAIN) seekStuckY = true
+        // 苹果在跳跃期间越过了小狗：落地后重新判断方向，别误判为卡住
+        if (far && !sameDir) jumpDyBefore = null
+      }
+      jumpSeek = false
+      fsmInstance?.send({ t: 'JUMP_LAND' })
+    }
+
+    /** 结束本轮找苹果：主进程收起苹果，菜单项恢复可用 */
+    const endAppleRound = (): void => {
+      if (!appleRoundActive) return
+      appleRoundActive = false
+      applePosReady = false
+      seekWalk = false
+      seekStuckY = false
+      jumpDyBefore = null
+      appleFadeSent = false
+      window.api.appleEnd()
+    }
+
+    /** 中断找苹果：收苹果 + 停位移 + 回待机（番茄钟、拖拽、超时共用） */
+    const abortSeek = (): void => {
+      if (!appleRoundActive) return
+      endAppleRound()
+      loco?.abort()
+      window.api.cancelJump()
+      fsm.send({ t: 'APPLE_CANCEL' })
+    }
+
+    /**
+     * 找苹果规划器：每帧在「思考」状态里决定下一步。
+     * 策略是先横后竖：水平没对齐就走到容差内，再按剩余高度分三段跳。
+     * 跳跃期间窗口纵向移动由主进程执行，这里只等待落地回到 AppleSeek。
+     */
+    const seekTick = (): void => {
+      if (!appleRoundActive || !applePosReady) return
+
+      // sit_enter 末尾把跟随苹果淡出，接上 sit_eat_happy 自带的苹果
+      if (fsm.current === 'SitEnter') {
+        if (
+          !appleFadeSent &&
+          player.clipId === 'sit_enter' &&
+          player.durationMs > 0 &&
+          player.elapsedMs >= player.durationMs - SIT_APPLE_FADE_MS
+        ) {
+          appleFadeSent = true
+          window.api.appleFadeOut()
+        }
+        return
+      }
+
+      // 行走段中：苹果还在动就持续修正方向，进入水平容差就刹车
+      if (fsm.current === 'Roam' && seekWalk) {
+        const { dx } = appleDelta()
+        if (Math.abs(dx) <= APPLE_ARRIVE_DX) loco?.halt()
+        else loco?.request(dx > 0 ? 'right' : 'left')
+        return
+      }
+
+      if (fsm.current !== 'AppleSeek') return
+
+      const { dx, dy } = appleDelta()
+
+      // 上一轮跳跃落地：纵向没有实质改善，说明已经贴到工作区边缘
+      if (jumpDyBefore !== null) {
+        if (
+          Math.abs(dy) > APPLE_ARRIVE_DY &&
+          Math.abs(dy) > Math.abs(jumpDyBefore) - SEEK_MIN_GAIN
+        ) {
+          seekStuckY = true
+        }
+        jumpDyBefore = null
+      }
+
+      if (Math.abs(dx) <= APPLE_ARRIVE_DX && Math.abs(dy) <= APPLE_ARRIVE_DY) {
+        // 到点：按坐姿反推的位置钉住苹果，同时开始坐下
+        const facingRight = loco?.currentFacing === 'right'
+        window.api.applePin({
+          cx:
+            window.screenX +
+            (facingRight ? APPLE_PIN_CX_RIGHT : APPLE_PIN_CX_LEFT) * scaleRef.current,
+          bottom: window.screenY + APPLE_PIN_BOTTOM_Y * scaleRef.current
+        })
+        appleFadeSent = false
+        fsm.send({ t: 'APPLE_ARRIVED' })
+        return
+      }
+
+      // 先横后竖：水平没对齐就发起一段行走
+      if (Math.abs(dx) > APPLE_ARRIVE_DX) {
+        seekWalk = true
+        pendingWalk = dx > 0 ? 'right' : 'left'
+        fsm.send({ t: 'WALK_START', returnTo: 'AppleSeek' })
+        void spriteSource.load('walk_turn')
+        void spriteSource.load('walk_stop')
+        return
+      }
+
+      // 竖直方向已判定走不通，原地等超时放弃
+      if (seekStuckY) return
+
+      // 按剩余距离均摊到每一跳，避免贴脸还整段跳 60 DIP
+      const up = dy < 0
+      const base = (up ? JUMP_STEP_UP : JUMP_STEP_DOWN) * scaleRef.current
+      const stepDip = Math.max(1, Math.min(Math.abs(dy) / 3, base))
+      jumpDyBefore = dy
+      fsm.send({ t: 'JUMP_START', dir: up ? 'up' : 'down', stepDip, returnTo: 'AppleSeek' })
     }
 
     void player.play(STATE_CLIP[fsm.current])
@@ -366,6 +586,10 @@ export default function PetCanvas(): JSX.Element {
         }
         drawnClipId = clipId
         if (clipId === 'walk_loop') walkCycleSeen = 0
+        if (clipId === 'jump_loop') {
+          jumpCycleSeen = 0
+          jumpLoopCount = 0
+        }
       }
 
       // 走满一个完整循环后，才允许编排器掉头或刹车
@@ -379,6 +603,21 @@ export default function PetCanvas(): JSX.Element {
           }
         }
       }
+
+      // jump_loop 循环播放：每跨过一圈决定继续串联还是落地
+      if (fsm.current === 'JumpLoop' && player.clipId === 'jump_loop') {
+        const duration = player.durationMs
+        if (duration > 0) {
+          const cycle = Math.floor(player.elapsedMs / duration)
+          if (cycle > jumpCycleSeen) {
+            jumpCycleSeen = cycle
+            onJumpCycleEnd()
+          }
+        }
+      }
+
+      // 找苹果：逐帧规划下一步走 / 跳 / 到点坐下
+      seekTick()
 
       // 拎起/落地期间按窗口横向运动更新摆动角，其他状态保持竖直
       const held =
@@ -476,19 +715,8 @@ export default function PetCanvas(): JSX.Element {
         }
       }
 
-      // 走路、坐姿互动、看屏幕指东西、整轮跳跃都属于「有活动」：期间持续刷新活动时间，
-      // 否则静置计时会一路累加，刚坐下或刚跳完就直接触发入睡
-      if (
-        fsm.current === 'Roam' ||
-        isSitState(fsm.current) ||
-        isPointState(fsm.current) ||
-        isJumpState(fsm.current)
-      ) {
-        lastInputAt = now
-      }
-
       // 番茄钟期间：写作业循环，每 4~6 轮插一次打瞌睡；
-      // 非专注时段：静置一会儿随机播日常动作，超过 1 分钟无操作就入睡。
+      // 非专注时段：超过 5 分钟没有用户操作就入睡，自主动作只在播完后延迟入睡。
       const idleMs = now - lastInputAt
       if (pomodoroRunning.current) {
         if (fsm.current === 'Idle') {
@@ -507,6 +735,15 @@ export default function PetCanvas(): JSX.Element {
         }
       }
 
+      // 连续睡满 5 分钟自动起床；同时重置静置计时，避免刚起床又立刻入睡
+      if (
+        (fsm.current === 'Sleepy' || fsm.current === 'Sleeping') &&
+        now - sleepAt >= SLEEP_WAKE_MS
+      ) {
+        lastInputAt = now
+        fsm.send({ t: 'WAKE' })
+      }
+
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)
@@ -516,6 +753,8 @@ export default function PetCanvas(): JSX.Element {
       lastInputAt = performance.now()
       // 拖拽优先级最高：立刻中断行走并停止窗口位移
       if (e.t === 'DRAG_START') {
+        // 找苹果途中被拎起：本轮直接中断，苹果收起
+        if (appleRoundActive) abortSeek()
         loco?.abort()
         window.api.cancelJump()
         // 拎起后主进程会用 200ms 把光标对齐到后颈，这段缓动会伪造横向速度，先忽略
@@ -539,6 +778,8 @@ export default function PetCanvas(): JSX.Element {
         lastInputAt = performance.now()
         pomoEndPending = false
         pomoEndSkipLoop = false
+        // 番茄钟优先：找苹果立刻中断、收起苹果，马上进作业
+        if (appleRoundActive) abortSeek()
         // 番茄钟优先于散步：立刻收脚进写作业
         if (fsm.current === 'Roam') {
           loco?.abort()
@@ -571,6 +812,7 @@ export default function PetCanvas(): JSX.Element {
       focusModeRef.current = s.focusMode
       keyBubbleRef.current = s.keyBubble
       setFocusMode(s.focusMode)
+      setShowState(s.showState)
       // 进入专注也当作一次操作，顺便把睡着的叫醒
       if (s.focusMode) {
         lastInputAt = performance.now()
@@ -591,6 +833,8 @@ export default function PetCanvas(): JSX.Element {
 
     // ---- 托盘行走 / 跳跃指令 ----
     const offLoco = window.api.onLocomotion((cmd) => {
+      // 托盘指令算一次用户操作，重置睡觉计时
+      lastInputAt = performance.now()
       if (cmd === 'stop') {
         loco?.halt()
         return
@@ -600,6 +844,38 @@ export default function PetCanvas(): JSX.Element {
         return
       }
       requestWalk(cmd === 'walk-left' ? 'left' : 'right')
+    })
+
+    // ---- 找苹果 ----
+    const offAppleSummon = window.api.onAppleSummon(() => {
+      lastInputAt = performance.now()
+      appleRoundActive = true
+      applePosReady = false
+      seekWalk = false
+      seekStuckY = false
+      jumpDyBefore = null
+      appleFadeSent = false
+      fsm.send({ t: 'APPLE_SUMMON' })
+      // 当前状态不接受召唤（作业、拎起、跳跃中）：直接收起苹果，别让它悬着
+      if (fsm.current !== 'AppleSeek') {
+        appleRoundActive = false
+        window.api.appleEnd()
+        return
+      }
+      // 到点要连续播坐姿与吃苹果，提前解码
+      void spriteSource.load('sit_enter')
+      void spriteSource.load('sit_eat_happy')
+    })
+
+    const offApplePos = window.api.onApplePos((p) => {
+      if (!appleRoundActive) return
+      applePos = p
+      applePosReady = true
+    })
+
+    const offAppleExpired = window.api.onAppleExpired(() => {
+      // 主进程已经收起苹果，这里把状态机拉回待机
+      abortSeek()
     })
 
     const offScale = window.api.onScale((s) => {
@@ -618,6 +894,9 @@ export default function PetCanvas(): JSX.Element {
       offCursor()
       offScale()
       offLoco()
+      offAppleSummon()
+      offApplePos()
+      offAppleExpired()
       loco?.dispose()
       window.api.cancelJump()
       clearTimeout(preloadTimer)
@@ -634,7 +913,9 @@ export default function PetCanvas(): JSX.Element {
         height={Math.round(CANVAS_SIZE.height * scale)}
         className="stage-canvas"
       />
-      <div className="stage-debug">{focusMode ? `Focus · ${state}` : state}</div>
+      {showState && (
+        <div className="stage-debug">{focusMode ? `Focus · ${state}` : state}</div>
+      )}
       {remainMs > 0 && <div className="stage-timer">{formatRemain(remainMs)}</div>}
       {keyLabel && (
         <div key={keyLabel.seq} className="stage-key">

@@ -197,7 +197,7 @@
   },
   "jump_loop": {
     "fps": 24,
-    "loop": "once",
+    "loop": "loop",
     "frameCount": 97,
     "interruptible": false,
     "anchor": { "x": 150, "y": 270 }
