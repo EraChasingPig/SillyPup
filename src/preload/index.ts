@@ -4,6 +4,7 @@ import type {
   CursorPayload,
   FocusState,
   HitMask,
+  JumpMovePlan,
   KeyEventPayload,
   LocomotionCmd,
   MoveDirection,
@@ -108,6 +109,16 @@ const api = {
   /** 渲染层 → 主进程：开始 / 停止窗口水平位移 */
   setMoving: (dir: MoveDirection): void => {
     ipcRenderer.send(IPC_CHANNELS.MOVE, dir)
+  },
+
+  /** 渲染层 → 主进程：下发一轮跳跃的窗口垂直位移时间表 */
+  jumpMove: (plan: JumpMovePlan): void => {
+    ipcRenderer.send(IPC_CHANNELS.JUMP_MOVE, plan)
+  },
+
+  /** 渲染层 → 主进程：取消跳跃位移（被打断或已落地） */
+  cancelJump: (): void => {
+    ipcRenderer.send(IPC_CHANNELS.JUMP_CANCEL)
   }
 }
 

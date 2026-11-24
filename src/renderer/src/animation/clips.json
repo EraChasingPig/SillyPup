@@ -187,5 +187,26 @@
     "frameCount": 145,
     "interruptible": false,
     "anchor": { "x": 150, "y": 270 }
+  },
+  "jump_prepare": {
+    "fps": 24,
+    "loop": "once",
+    "frameCount": 97,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "jump_loop": {
+    "fps": 24,
+    "loop": "once",
+    "frameCount": 97,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
+  },
+  "jump_land": {
+    "fps": 24.149,
+    "loop": "once",
+    "frameCount": 97,
+    "interruptible": false,
+    "anchor": { "x": 150, "y": 270 }
   }
 }

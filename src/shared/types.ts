@@ -47,6 +47,12 @@ export type PetState =
   | 'SitAngry'
   | 'PointPeek'
   | 'PointShow'
+  | 'JumpPrepare'
+  | 'JumpLoop'
+  | 'JumpLand'
+
+/** 跳跃方向；inPlace 表示原地跳一轮，不移动窗口 */
+export type JumpDirection = 'up' | 'down' | 'inPlace'
 
 // 状态机事件
 export type PetEvent =
@@ -65,6 +71,7 @@ export type PetEvent =
   | { t: 'SIT_TRIGGER' }
   | { t: 'SIT_TIMEOUT' }
   | { t: 'POINT_TRIGGER' }
+  | { t: 'JUMP_START'; dir: JumpDirection }
   | { t: 'MODE_CHANGED'; mode: PetMode }
 
 /** 主进程 → 渲染层 的输入事件子集 */
@@ -112,11 +119,34 @@ export const IPC_CHANNELS = {
   /** 主进程 → 渲染层：托盘发起的移动指令 */
   LOCOMOTION: 'pet:locomotion',
   /** 渲染层 → 主进程：开始 / 停止窗口水平位移 */
-  MOVE: 'pet:move'
+  MOVE: 'pet:move',
+  /** 渲染层 → 主进程：下发一轮跳跃的窗口垂直位移时间表 */
+  JUMP_MOVE: 'pet:jump-move',
+  /** 渲染层 → 主进程：取消跳跃位移（被打断或已落地） */
+  JUMP_CANCEL: 'pet:jump-cancel'
 } as const
 
-/** 移动指令入口（目前只有托盘临时菜单） */
-export type LocomotionCmd = 'walk-left' | 'walk-right' | 'stop'
+/** 跳跃时间表中的一次腾空区间，单位毫秒，相对 jump_loop 开始播放 */
+export interface JumpHop {
+  startMs: number
+  endMs: number
+}
+
+/** 一轮跳跃的窗口垂直位移计划，由渲染层按素材实测节奏下发 */
+export interface JumpMovePlan {
+  dir: 'up' | 'down'
+  /** 每跳的窗口位移（DIP，已按当前缩放换算） */
+  stepDip: number
+  hops: JumpHop[]
+}
+
+/** 移动指令入口（托盘临时菜单：走路与上下跳） */
+export type LocomotionCmd =
+  | 'walk-left'
+  | 'walk-right'
+  | 'jump-up'
+  | 'jump-down'
+  | 'stop'
 
 /** 窗口水平位移方向，null 表示停在原地 */
 export type MoveDirection = 'left' | 'right' | null

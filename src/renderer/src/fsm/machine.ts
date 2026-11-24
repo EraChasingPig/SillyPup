@@ -26,7 +26,11 @@ export const STATE_CLIP: Record<PetState, string> = {
   SitAngry: 'sit_angry',
   // 指屏幕：背对/回头素材，同样按当前朝向镜像
   PointPeek: 'point_peek',
-  PointShow: 'point_show'
+  PointShow: 'point_show',
+  // 原地跳跃：起跳前 → 三次循环跳 → 落地回待机
+  JumpPrepare: 'jump_prepare',
+  JumpLoop: 'jump_loop',
+  JumpLand: 'jump_land'
 }
 
 /** 坐姿讨食系列状态（正面朝观众，且都算「有互动」） */
@@ -39,6 +43,11 @@ export function isSitState(state: PetState): boolean {
 /** 指屏幕系列状态（播放期间算「有互动」，点击忽略、拖拽可打断） */
 export function isPointState(state: PetState): boolean {
   return state === 'PointPeek' || state === 'PointShow'
+}
+
+/** 跳跃系列状态（整轮播放期间算「有互动」） */
+export function isJumpState(state: PetState): boolean {
+  return state === 'JumpPrepare' || state === 'JumpLoop' || state === 'JumpLand'
 }
 
 /** 写作业相关状态（专注期间这些状态由素材自己画书桌，不再叠加 Focus 场景） */
@@ -60,10 +69,17 @@ export const DAILY_ACTION_CLIPS = [
   'action_taunt'
 ]
 
-/** 随机挑一个日常动作，尽量不与上一个重复 */
-export function pickDailyAction(prev: string | null): string {
-  const pool = DAILY_ACTION_CLIPS.filter((id) => id !== prev)
-  const list = pool.length > 0 ? pool : DAILY_ACTION_CLIPS
+/** 日常互动池：整轮跳跃作为一个条目，不单独设概率 */
+export const DAILY_ITEMS = [...DAILY_ACTION_CLIPS, 'jump']
+
+/**
+ * 随机挑一个日常互动，尽量不与上一个重复。
+ * allowJump=false 时（大动作冷却期内）暂时把跳跃从池子里剔除。
+ */
+export function pickDailyItem(prev: string | null, allowJump: boolean): string {
+  const allowed = DAILY_ITEMS.filter((id) => allowJump || id !== 'jump')
+  const pool = allowed.filter((id) => id !== prev)
+  const list = pool.length > 0 ? pool : allowed
   return list[Math.floor(Math.random() * list.length)] ?? 'action_wag'
 }
 
@@ -140,7 +156,10 @@ export class PetFSM {
           'SitEat',
           'SitAngry',
           'PointPeek',
-          'PointShow'
+          'PointShow',
+          'JumpPrepare',
+          'JumpLoop',
+          'JumpLand'
         ]
         return busy.includes(state) ? null : 'Interact'
       }
@@ -187,6 +206,10 @@ export class PetFSM {
         if (now < this.cooldownUntil) return null
         return state === 'Idle' ? 'PointPeek' : null
 
+      case 'JUMP_START':
+        // 只在待机时起跳；托盘指令与日常池共用这条入口
+        return state === 'Idle' ? 'JumpPrepare' : null
+
       case 'DRAG_END':
         return state === 'Grabbed' || state === 'Dragging' ? 'Dropped' : null
 
@@ -211,6 +234,12 @@ export class PetFSM {
           case 'PointPeek':
             return 'PointShow'
           case 'PointShow':
+            return 'Idle'
+          case 'JumpPrepare':
+            return 'JumpLoop'
+          case 'JumpLoop':
+            return 'JumpLand'
+          case 'JumpLand':
             return 'Idle'
           case 'Wake':
           case 'Interact':

@@ -60,10 +60,13 @@ export function createTray(
       }
     },
     { type: 'separator' },
-    // 散步的临时入口，后续接入喂食模式与 WASD 主动控制后移除
+    // 散步与跳跃的临时入口，后续接入喂食模式与 WASD 主动控制后移除
     { label: '向左走', click: () => onLocomotion('walk-left') },
     { label: '向右走', click: () => onLocomotion('walk-right') },
     { label: '停下', click: () => onLocomotion('stop') },
+    { type: 'separator' },
+    { label: '向上跳一层', click: () => onLocomotion('jump-up') },
+    { label: '向下跳一层', click: () => onLocomotion('jump-down') },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() }
   ])

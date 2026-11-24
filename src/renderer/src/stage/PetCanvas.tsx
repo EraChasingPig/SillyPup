@@ -1,12 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { spriteSource, CANVAS_SIZE } from '../animation/SpriteSource'
 import { AnimationPlayer } from '../animation/AnimationPlayer'
-import { PetFSM, STATE_CLIP, isHomeworkState, isSitState, isPointState, pickDailyAction } from '../fsm/machine'
+import {
+  PetFSM,
+  STATE_CLIP,
+  isHomeworkState,
+  isSitState,
+  isPointState,
+  isJumpState,
+  pickDailyItem
+} from '../fsm/machine'
 import { Locomotion, type Facing } from '../fsm/locomotion'
 import { drawFocusScene, mapToPad, padCenter, smoothHand } from './focusScene'
 import { Sway } from './sway'
 import { PET_GRAB_ANCHOR } from '../../../shared/types'
-import type { CursorPayload, PetEvent, PetState } from '../../../shared/types'
+import type { CursorPayload, JumpDirection, PetEvent, PetState } from '../../../shared/types'
 
 /** 掩码降采样分辨率：64×64 足够判断光标是否压在身上 */
 const MASK_RES = 64
@@ -30,6 +38,17 @@ const KEY_BUBBLE_MS = 900
 const TYPING_MS = 260
 /** 悬挂弯曲的横切片高度：越小越柔和，越大绘制调用越少 */
 const SWAY_SLICE_H = 4
+/** 每跳窗口上升距离（DIP，按当前缩放换算） */
+const JUMP_STEP_UP = 60
+/** 向下跳的单跳下沉距离：小于素材腾空高度（约 44px），保留“先跳起再落到下一级”的观感 */
+const JUMP_STEP_DOWN = 40
+/** jump_loop 每跳的腾空帧区间（24fps，按素材逐帧实测） */
+const JUMP_HOP_AIR_FRAMES: ReadonlyArray<readonly [number, number]> = [
+  [13, 32],
+  [41, 59],
+  [65, 81]
+]
+const JUMP_LOOP_FPS = 24
 
 function formatRemain(ms: number): string {
   const total = Math.ceil(ms / 1000)
@@ -95,7 +114,12 @@ export default function PetCanvas(): JSX.Element {
 
     let stateEnteredAt = performance.now()
     let lastInputAt = performance.now()
-    let lastActionClip: string | null = null
+    /** 本轮日常互动抽中的条目，进入 Action / Interact 时用于播放 */
+    let pendingActionClip: string | null = null
+    /** 上一次抽中的日常条目，包含 'jump'，用于避免连续重复 */
+    let lastDailyItem: string | null = null
+    /** 本轮跳跃的方向；inPlace 表示原地跳、不移动窗口 */
+    let jumpDir: JumpDirection = 'inPlace'
     /** 上一次坐姿/指屏幕的触发时间，用于 30 秒特殊行为冷却 */
     let lastSpecialAt = Number.NEGATIVE_INFINITY
     /** 下一次插入打瞌睡的时刻（4~6 个作业循环后） */
@@ -113,19 +137,60 @@ export default function PetCanvas(): JSX.Element {
       return null
     }
 
-    const fsm = new PetFSM((_from, to) => {
+    /**
+     * 待机互动掷骰：先试特殊行为，再落到日常池。
+     * 抽中整轮跳跃时直接返回 JUMP_START；抽中普通动作则只记下 clip，返回 null，
+     * 由调用方继续走 IDLE_TIMEOUT / CLICK。
+     */
+    const rollIdleExtra = (now: number): PetEvent | null => {
+      const special = rollSpecial(now)
+      if (special) return special
+      const allowJump = now - lastSpecialAt >= SPECIAL_COOLDOWN_MS
+      const item = pickDailyItem(lastDailyItem, allowJump)
+      lastDailyItem = item
+      if (item === 'jump') return { t: 'JUMP_START', dir: 'inPlace' }
+      pendingActionClip = item
+      return null
+    }
+
+    /** 进入跳跃循环后，按素材腾空帧区间把窗口位移时间表发给主进程 */
+    const startJumpMove = (): void => {
+      if (jumpDir === 'inPlace') return
+      const stepDip = (jumpDir === 'up' ? JUMP_STEP_UP : JUMP_STEP_DOWN) * scaleRef.current
+      const hops = JUMP_HOP_AIR_FRAMES.map(([start, end]) => ({
+        startMs: Math.round((start / JUMP_LOOP_FPS) * 1000),
+        endMs: Math.round((end / JUMP_LOOP_FPS) * 1000)
+      }))
+      window.api.jumpMove({ dir: jumpDir, stepDip, hops })
+    }
+
+    const fsm = new PetFSM((from, to, e) => {
       stateEnteredAt = performance.now()
       setState(to)
-      // 坐姿与指屏幕共享 30 秒特殊行为冷却
-      if (to === 'SitEnter' || to === 'PointPeek') lastSpecialAt = performance.now()
-      // 待机超时与点击共用日常动作池，随机挑一个且不与上次重复
+      // 离开跳跃循环时立刻停掉窗口位移，拖拽打断时尤其重要
+      if (from === 'JumpLoop') window.api.cancelJump()
+      // 坐姿、指屏幕与整轮跳跃共享 30 秒大动作冷却
+      if (to === 'SitEnter' || to === 'PointPeek' || to === 'JumpPrepare') {
+        lastSpecialAt = performance.now()
+      }
+      // 待机超时与点击共用日常池，抽中的条目在掷骰时已经定好
       let clipId = STATE_CLIP[to]
       if (to === 'Action' || to === 'Interact') {
-        clipId = pickDailyAction(lastActionClip)
-        lastActionClip = clipId
+        clipId = pendingActionClip ?? pickDailyItem(lastDailyItem, false)
+        pendingActionClip = null
+        lastDailyItem = clipId
       }
       // Roam 的动画由编排器逐段播放
-      if (to !== 'Roam') void player.play(clipId)
+      if (to === 'Roam') {
+        /* 由编排器接管 */
+      } else if (to === 'JumpLoop') {
+        // 等循环片段真正开始播放，再按腾空区间下发窗口位移
+        void player.play(clipId).then(() => {
+          if (fsmInstance?.current === 'JumpLoop') startJumpMove()
+        })
+      } else {
+        void player.play(clipId)
+      }
       // 入睡片段只有 4 秒，进 Sleepy 时先把循环和起床片段预加载好
       if (to === 'Sleepy') {
         void spriteSource.load('sleep_loop')
@@ -159,6 +224,12 @@ export default function PetCanvas(): JSX.Element {
       if (to === 'PointPeek') {
         void spriteSource.load('point_show')
       }
+      // 起跳前有 4 秒，把循环和落地两段都解码好
+      if (to === 'JumpPrepare') {
+        jumpDir = e.t === 'JUMP_START' ? e.dir : 'inPlace'
+        void spriteSource.load('jump_loop')
+        void spriteSource.load('jump_land')
+      }
     })
     fsmInstance = fsm
 
@@ -182,6 +253,13 @@ export default function PetCanvas(): JSX.Element {
       // 起步 1.9 秒足够把后两段解码好
       void spriteSource.load('walk_turn')
       void spriteSource.load('walk_stop')
+    }
+
+    /** 托盘指令：向上 / 向下跳一层（一轮三段） */
+    const requestJump = (dir: 'up' | 'down'): void => {
+      // 专注模式不跳；只在待机时起跳，跳跃期间忽略重复指令
+      if (focusModeRef.current || fsm.current !== 'Idle') return
+      fsm.send({ t: 'JUMP_START', dir })
     }
 
     void player.play(STATE_CLIP[fsm.current])
@@ -269,10 +347,11 @@ export default function PetCanvas(): JSX.Element {
       // clip 切换时先快照上一帧，新片段首帧绘制后再淡出快照
       const clipId = player.clipId
       if (clipId && clipId !== drawnClipId) {
-        // 行走四段、看屏幕两段都是同一套连续动作，段间不做淡化；
-        // 只有进出这些连续片段（待机→起步、指完→待机）才需要淡化遮住姿势差
+        // 行走四段、看屏幕两段、跳跃三段都是同一套连续动作，段间不做淡化；
+        // 只有进出这些连续片段（待机→起步、跳完→待机）才需要淡化遮住姿势差
         const isChainClip = (id: string | null): boolean =>
-          id !== null && (id.startsWith('walk_') || id.startsWith('point_'))
+          id !== null &&
+          (id.startsWith('walk_') || id.startsWith('point_') || id.startsWith('jump_'))
         const seamless = isChainClip(drawnClipId) && isChainClip(clipId)
         if (drawnClipId && fadeCtx && !seamless) {
           if (fadeCanvas.width !== canvas.width || fadeCanvas.height !== canvas.height) {
@@ -397,12 +476,13 @@ export default function PetCanvas(): JSX.Element {
         }
       }
 
-      // 走路、坐姿互动、看屏幕指东西都属于「有活动」：期间持续刷新活动时间，
-      // 否则静置计时会一路累加，刚坐下就直接触发入睡
+      // 走路、坐姿互动、看屏幕指东西、整轮跳跃都属于「有活动」：期间持续刷新活动时间，
+      // 否则静置计时会一路累加，刚坐下或刚跳完就直接触发入睡
       if (
         fsm.current === 'Roam' ||
         isSitState(fsm.current) ||
-        isPointState(fsm.current)
+        isPointState(fsm.current) ||
+        isJumpState(fsm.current)
       ) {
         lastInputAt = now
       }
@@ -423,7 +503,7 @@ export default function PetCanvas(): JSX.Element {
         } else if (idleMs > SLEEP_AFTER_MS) {
           fsm.send({ t: 'SLEEP' })
         } else if (fsm.current === 'Idle' && now - stateEnteredAt > IDLE_DWELL_MS) {
-          fsm.send(rollSpecial(now) ?? { t: 'IDLE_TIMEOUT' })
+          fsm.send(rollIdleExtra(now) ?? { t: 'IDLE_TIMEOUT' })
         }
       }
 
@@ -437,14 +517,15 @@ export default function PetCanvas(): JSX.Element {
       // 拖拽优先级最高：立刻中断行走并停止窗口位移
       if (e.t === 'DRAG_START') {
         loco?.abort()
+        window.api.cancelJump()
         // 拎起后主进程会用 200ms 把光标对齐到后颈，这段缓动会伪造横向速度，先忽略
         sway.begin(performance.now(), 220)
       }
-      // 待机时点一下：先掷特殊行为（指屏幕 15% / 坐姿 15%），没抽中就走日常互动
+      // 待机时点一下：先掷特殊行为（指屏幕 15% / 坐姿 15%），没抽中再掷日常池（含整轮跳跃）
       if (e.t === 'CLICK' && !focusModeRef.current && fsm.current === 'Idle') {
-        const special = rollSpecial(performance.now())
-        if (special) {
-          fsm.send(special)
+        const extra = rollIdleExtra(performance.now())
+        if (extra) {
+          fsm.send(extra)
           return
         }
       }
@@ -508,10 +589,14 @@ export default function PetCanvas(): JSX.Element {
       cursorRef.current = p
     })
 
-    // ---- 托盘行走指令 ----
+    // ---- 托盘行走 / 跳跃指令 ----
     const offLoco = window.api.onLocomotion((cmd) => {
       if (cmd === 'stop') {
         loco?.halt()
+        return
+      }
+      if (cmd === 'jump-up' || cmd === 'jump-down') {
+        requestJump(cmd === 'jump-up' ? 'up' : 'down')
         return
       }
       requestWalk(cmd === 'walk-left' ? 'left' : 'right')
@@ -534,6 +619,7 @@ export default function PetCanvas(): JSX.Element {
       offScale()
       offLoco()
       loco?.dispose()
+      window.api.cancelJump()
       clearTimeout(preloadTimer)
       cancelAnimationFrame(raf)
       spriteSource.dispose()
