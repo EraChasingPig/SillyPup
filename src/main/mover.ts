@@ -1,5 +1,6 @@
 import { BrowserWindow, screen } from 'electron'
 import type { MoveDirection } from '../shared/types'
+import { sizeForScale } from './window'
 
 /** 行走速度（DIP/s）：按 walk_loop 每循环步幅标定，实机再微调 */
 const WALK_SPEED = 110
@@ -30,12 +31,14 @@ export function createMover(win: BrowserWindow, getScale: () => number): Mover {
 
     const [x, y] = win.getPosition()
     const b = win.getBounds()
+    // 非整数缩放下一律用带尺寸的 setBounds 移动，setPosition 会把窗口越撑越大
+    const size = sizeForScale(getScale())
     const wa = screen.getDisplayNearestPoint({ x: x + b.width / 2, y: y + b.height / 2 }).workArea
     const minX = wa.x + EDGE_MARGIN
     const maxX = wa.x + wa.width - b.width - EDGE_MARGIN
     const next = Math.round(x + dir * WALK_SPEED * getScale() * dt)
     const clamped = Math.min(Math.max(next, minX), maxX)
-    if (clamped !== x) win.setPosition(clamped, y)
+    if (clamped !== x) win.setBounds({ x: clamped, y, width: size, height: size })
   }
 
   const timer = setInterval(step, TICK_MS)

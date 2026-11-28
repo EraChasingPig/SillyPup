@@ -1,5 +1,6 @@
 import { BrowserWindow, screen } from 'electron'
 import type { JumpMovePlan } from '../shared/types'
+import { sizeForScale } from './window'
 
 /** 离显示器工作区上下边缘保留的最小间距，与水平行走一致 */
 const EDGE_MARGIN = 15
@@ -24,7 +25,7 @@ function smoothstep(t: number): number {
  * 渲染层按素材实测的腾空区间下发时间表，这里只负责把窗口 y 往对应方向搬，
  * 并在显示器工作区边缘钳制；动画本身不受影响（到顶继续原地跳）。
  */
-export function createJumpMover(win: BrowserWindow): JumpMover {
+export function createJumpMover(win: BrowserWindow, getScale: () => number): JumpMover {
   let timer: ReturnType<typeof setInterval> | null = null
   let plan: JumpMovePlan | null = null
   let startAt = 0
@@ -32,6 +33,8 @@ export function createJumpMover(win: BrowserWindow): JumpMover {
   let anchorY = 0
   let minY = 0
   let maxY = 0
+  /** 移动时显式带上的窗口边长：非整数缩放下 setPosition 会把窗口撑大 */
+  let size = 0
 
   const stop = (): void => {
     if (timer) {
@@ -64,7 +67,7 @@ export function createJumpMover(win: BrowserWindow): JumpMover {
       sign < 0
         ? Math.max(rawY, Math.min(minY, anchorY))
         : Math.min(rawY, Math.max(maxY, anchorY))
-    win.setPosition(anchorX, y)
+    win.setBounds({ x: anchorX, y, width: size, height: size })
 
     const lastEnd = plan.hops[plan.hops.length - 1]?.endMs ?? 0
     if (t >= lastEnd + TICK_MS) {
@@ -86,6 +89,7 @@ export function createJumpMover(win: BrowserWindow): JumpMover {
       plan = next
       anchorX = b.x
       anchorY = b.y
+      size = sizeForScale(getScale())
       minY = wa.y + EDGE_MARGIN
       maxY = wa.y + wa.height - b.height - EDGE_MARGIN
       startAt = performance.now()

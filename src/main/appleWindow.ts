@@ -119,7 +119,12 @@ export class AppleWindow {
     if (!win || win.isDestroyed()) return
     win.hide()
     const { w, h } = this.pixelSize()
-    win.setPosition(Math.round(pos.cx - w / 2), Math.round(pos.bottom - h))
+    win.setBounds({
+      x: Math.round(pos.cx - w / 2),
+      y: Math.round(pos.bottom - h),
+      width: w,
+      height: h
+    })
     win.showInactive()
     win.moveTop()
   }
@@ -227,7 +232,7 @@ export class AppleWindow {
     )
     const bottom = clamp(cursor.y + APPLE_FOLLOW_OFFSET_Y * s + h / 2, minBottom, maxBottom)
 
-    win.setPosition(Math.round(cx - w / 2), Math.round(bottom - h))
+    win.setBounds({ x: Math.round(cx - w / 2), y: Math.round(bottom - h), width: w, height: h })
 
     const now = performance.now()
     if (now - this.lastReportAt >= POS_REPORT_MS) {

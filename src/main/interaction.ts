@@ -3,6 +3,7 @@ import koffi from 'koffi'
 import { PET_BASE_SIZE, PET_GRAB_ANCHOR } from '../shared/types'
 import type { PetInputEvent, Point, Size } from '../shared/types'
 import type { HitMaskStore } from './hitMask'
+import { sizeForScale } from './window'
 
 const VK_LBUTTON = 0x01
 const VK_RBUTTON = 0x02
@@ -125,6 +126,9 @@ export function startInteraction(
     const cursor = screen.getCursorScreenPoint()
     const [wx, wy] = win.getPosition()
     const bounds = win.getBounds()
+    // 尺寸一律用当前缩放对应的标准边长，绝不能拿 getBounds() 的读数再喂回 setBounds：
+    // 非整数缩放（125%/150%）下读回的尺寸偏大，逐帧回写会把它越放越大
+    const size = sizeForScale(scale.get())
     const local = { x: cursor.x - wx, y: cursor.y - wy }
     const hit = maskStore.hit(local.x, local.y)
 
@@ -142,11 +146,21 @@ export function startInteraction(
     if (dropping) {
       const t = performance.now() - dropStartedAt
       if (t >= DROP_HOLD_MS + DROP_FALL_MS) {
-        win.setPosition(wx, Math.round(dropStartY + dropDist))
+        win.setBounds({
+          x: wx,
+          y: Math.round(dropStartY + dropDist),
+          width: size,
+          height: size
+        })
         dropping = false
       } else if (t > DROP_HOLD_MS) {
         const k = (t - DROP_HOLD_MS) / DROP_FALL_MS
-        win.setPosition(wx, Math.round(dropStartY + dropDist * k * k))
+        win.setBounds({
+          x: wx,
+          y: Math.round(dropStartY + dropDist * k * k),
+          width: size,
+          height: size
+        })
       }
     }
 
@@ -225,8 +239,13 @@ export function startInteraction(
         const offsetX = grabOffset.x + (PET_GRAB_ANCHOR.x * s - grabOffset.x) * ease
         const offsetY = grabOffset.y + (PET_GRAB_ANCHOR.y * s - grabOffset.y) * ease
         const next = clampToWorkArea({ x: cursor.x - offsetX, y: cursor.y - offsetY }, bounds)
-        // setPosition 只接受整数，缓动产生的浮点值会直接抛 TypeError
-        win.setPosition(Math.round(next.x), Math.round(next.y))
+        // 只接受整数；带显式宽高移动，避免非整数缩放下 setPosition 把窗口越撑越大
+        win.setBounds({
+          x: Math.round(next.x),
+          y: Math.round(next.y),
+          width: size,
+          height: size
+        })
       }
     }
 
@@ -236,7 +255,7 @@ export function startInteraction(
         // 松手后再 clamp 一次，防止停在屏幕外（技术方案 B4）
         const [px, py] = win.getPosition()
         const clamped = clampToWorkArea({ x: px, y: py }, bounds)
-        win.setPosition(clamped.x, clamped.y)
+        win.setBounds({ x: clamped.x, y: clamped.y, width: size, height: size })
 
         // 预留下落空间，避免窗口落出工作区
         const wa = screen.getDisplayNearestPoint(clamped).workArea

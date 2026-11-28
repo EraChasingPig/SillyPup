@@ -7,8 +7,27 @@ function clamp(v: number, min: number, max: number): number {
 }
 
 /** 按缩放比例算出窗口边长（DIP），并夹在允许范围内 */
-function sizeForScale(scale: number): number {
+export function sizeForScale(scale: number): number {
   return Math.round(PET_BASE_SIZE * clamp(scale, PET_SCALE_MIN, PET_SCALE_MAX))
+}
+
+/**
+ * 移动窗口（保持尺寸不变）。
+ *
+ * Windows 在非整数显示缩放（125% / 150%）下存在缺陷：对窗口调用 setPosition 时，
+ * 系统会按错误的 DPI 换算悄悄把窗口撑大——实测 125% 下每移动一次宽度 +1px，
+ * 拖拽、行走、苹果跟随鼠标时表现为角色/苹果被持续拉长变大。
+ * 用带显式宽高的 setBounds 移动则尺寸稳定，因此所有高频位移统一走这里。
+ */
+export function moveWindowTo(
+  win: BrowserWindow,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): void {
+  if (win.isDestroyed()) return
+  win.setBounds({ x: Math.round(x), y: Math.round(y), width, height })
 }
 
 /**
@@ -79,6 +98,22 @@ export function createPetWindow(scale = 1): BrowserWindow {
   })
 
   return win
+}
+
+/**
+ * 显示器变化后把窗口拉回最近的显示器工作区。
+ * 拔掉副屏、改分辨率或改缩放后调用，避免窗口停在已不存在的屏幕上。
+ */
+export function keepPetOnScreen(win: BrowserWindow, scale: number): void {
+  if (win.isDestroyed()) return
+  const b = win.getBounds()
+  const size = sizeForScale(scale)
+  const wa = screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 }).workArea
+  const x = clamp(Math.round(b.x), wa.x, wa.x + wa.width - size)
+  const y = clamp(Math.round(b.y), wa.y, wa.y + wa.height - size)
+  if (x !== b.x || y !== b.y || b.width !== size || b.height !== size) {
+    moveWindowTo(win, x, y, size, size)
+  }
 }
 
 /** 置顶自愈间隔：足够短，用户几乎察觉不到空白；又足够长，避免频繁改动系统 z 序 */

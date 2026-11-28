@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { appendFileSync, mkdirSync, renameSync, statSync } from 'fs'
+import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync } from 'fs'
 import { join } from 'path'
 import { inspect } from 'util'
 
@@ -52,6 +52,18 @@ export function logInfo(...args: unknown[]): void {
 
 export function logError(...args: unknown[]): void {
   write('ERROR', args)
+}
+
+/** 读取日志尾部，供托盘「复制诊断信息」使用 */
+export function readLogTail(maxBytes = 32 * 1024): string {
+  const file = resolveFile()
+  if (!file) return '(日志文件不可用)'
+  try {
+    const text = readFileSync(file, 'utf-8')
+    return text.length > maxBytes ? text.slice(-maxBytes) : text
+  } catch {
+    return '(读取日志失败)'
+  }
 }
 
 /** 接管 console 与进程级异常，尽量把崩溃原因留在日志里。 */

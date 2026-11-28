@@ -95,6 +95,8 @@ export default function PetCanvas(): JSX.Element {
   const [focusMode, setFocusMode] = useState(false)
   const [showState, setShowState] = useState(false)
   const [scale, setScale] = useState(1)
+  /** 仅用于让画布尺寸跟随 devicePixelRatio 重新渲染 */
+  const [dpr, setDpr] = useState(() => window.devicePixelRatio || 1)
   const [keyLabel, setKeyLabel] = useState<{ label: string; seq: number } | null>(null)
   const pomodoroRunning = useRef(false)
 
@@ -103,6 +105,8 @@ export default function PetCanvas(): JSX.Element {
   const keyBubbleRef = useRef(true)
   const cursorRef = useRef<CursorPayload | null>(null)
   const scaleRef = useRef(1)
+  /** 画布分辨率倍数：窗口所在显示器的 devicePixelRatio，跨屏或改缩放时会变 */
+  const dprRef = useRef(window.devicePixelRatio || 1)
   const handRef = useRef(padCenter())
   const typingUntilRef = useRef(0)
   const keySeqRef = useRef(0)
@@ -122,8 +126,8 @@ export default function PetCanvas(): JSX.Element {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    // 帧按窗口缩放解码，先按当前缩放初始化一次
-    spriteSource.setRenderScale(scaleRef.current)
+    // 帧按「窗口缩放 × devicePixelRatio」解码，先按当前值初始化一次
+    spriteSource.setRenderScale(scaleRef.current * dprRef.current)
 
     // 拖拽三段在后台预热并常驻；缩放变化会解除常驻，停下后按新尺寸重新预热
     let warmTimer: ReturnType<typeof setTimeout> | null = null
@@ -157,6 +161,20 @@ export default function PetCanvas(): JSX.Element {
       }
       fsmInstance?.send({ t: 'ANIM_END', clipId })
     })
+
+    // 窗口跨屏或系统显示缩放变化时 devicePixelRatio 会变：
+    // 画布分辨率、绘制变换与解码尺寸都要跟着重建，否则画面会被系统放大而发糊
+    const syncDpr = (): void => {
+      const next = window.devicePixelRatio || 1
+      if (Math.abs(next - dprRef.current) < 0.001) return
+      dprRef.current = next
+      setDpr(next)
+      spriteSource.setRenderScale(scaleRef.current * next)
+      if (player.clipId) void player.play(player.clipId)
+      warmDragClips(SCALE_REWARM_DELAY_MS)
+    }
+    window.addEventListener('resize', syncDpr)
+    const offDisplayChanged = window.api.onDisplayChanged(syncDpr)
 
     let stateEnteredAt = performance.now()
     let lastInputAt = performance.now()
@@ -548,11 +566,12 @@ export default function PetCanvas(): JSX.Element {
 
       if (maxGx < 0) return // 理论上不会发生，防御空帧
 
-      // 包围盒换算回窗口像素，格子对齐与 cells 的分辨率保持一致
-      const x = Math.floor((minGx * canvas.width) / MASK_RES)
-      const y = Math.floor((minGy * canvas.height) / MASK_RES)
-      const right = Math.ceil(((maxGx + 1) * canvas.width) / MASK_RES)
-      const bottom = Math.ceil(((maxGy + 1) * canvas.height) / MASK_RES)
+      // 包围盒换算回窗口 DIP（画布分辨率是 DIP × devicePixelRatio）
+      const dprNow = dprRef.current || 1
+      const x = Math.floor((minGx * canvas.width) / MASK_RES / dprNow)
+      const y = Math.floor((minGy * canvas.height) / MASK_RES / dprNow)
+      const right = Math.ceil(((maxGx + 1) * canvas.width) / MASK_RES / dprNow)
+      const bottom = Math.ceil(((maxGy + 1) * canvas.height) / MASK_RES / dprNow)
 
       window.api.reportMask({
         res: MASK_RES,
@@ -637,8 +656,10 @@ export default function PetCanvas(): JSX.Element {
       const s = scaleRef.current
       ctx.setTransform(1, 0, 0, 1, 0, 0)
       ctx.clearRect(0, 0, canvas.width, canvas.height)
-      // 素材按 300×300 设计，缩放时整体放大绘制，遮罩坐标与窗口保持一致
-      ctx.setTransform(s, 0, 0, s, 0, 0)
+      // 素材按 300×300 设计；画布分辨率是 DIP × devicePixelRatio，
+      // 因此变换要再乘 DPR，缩放与 DPI 都不会让画面被系统二次放大
+      const k = s * dprRef.current
+      ctx.setTransform(k, 0, 0, k, 0, 0)
       if (focusModeRef.current && !isHomeworkState(fsm.current)) {
         // Focus 模式：手部向鼠标垫目标点做帧率无关平滑，边缘由 mapToPad 内缩限位
         const cursor = cursorRef.current
@@ -901,7 +922,7 @@ export default function PetCanvas(): JSX.Element {
 
     const offScale = window.api.onScale((s) => {
       scaleRef.current = s
-      spriteSource.setRenderScale(s)
+      spriteSource.setRenderScale(s * dprRef.current)
       // 按新尺寸重新解码当前片段；旧尺寸的缓存仍能正常绘制，会在 LRU 里自然换掉
       if (player.clipId) void player.play(player.clipId)
       // 缩放会解除常驻，等缩放手势停下再按新尺寸预热拖拽片段
@@ -919,6 +940,8 @@ export default function PetCanvas(): JSX.Element {
       offKey()
       offCursor()
       offScale()
+      offDisplayChanged()
+      window.removeEventListener('resize', syncDpr)
       offLoco()
       offAppleSummon()
       offApplePos()
@@ -935,8 +958,8 @@ export default function PetCanvas(): JSX.Element {
     <div className="stage">
       <canvas
         ref={canvasRef}
-        width={Math.round(CANVAS_SIZE.width * scale)}
-        height={Math.round(CANVAS_SIZE.height * scale)}
+        width={Math.round(CANVAS_SIZE.width * scale * dpr)}
+        height={Math.round(CANVAS_SIZE.height * scale * dpr)}
         className="stage-canvas"
       />
       {showState && (

@@ -144,6 +144,8 @@ export const IPC_CHANNELS = {
   CURSOR: 'pet:cursor',
   /** 主进程 → 渲染层：桌宠缩放比例 */
   SCALE: 'pet:scale',
+  /** 主进程 → 渲染层：显示器增删或缩放变化，需要按新 DPR 重建画布 */
+  DISPLAY_CHANGED: 'pet:display-changed',
   /** 主进程 → 渲染层：托盘发起的移动指令 */
   LOCOMOTION: 'pet:locomotion',
   /** 渲染层 → 主进程：开始 / 停止窗口水平位移 */

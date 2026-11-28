@@ -16,6 +16,8 @@ export interface AppConfig {
   autoLaunch: boolean
   /** 桌宠缩放比例（1 为基准尺寸） */
   scale: number
+  /** 兼容渲染：关闭 GPU 合成，缓解老显卡 / 远程桌面下的透明窗黑块（需重启） */
+  compatRender: boolean
 }
 
 const DEFAULTS: AppConfig = {
@@ -24,7 +26,8 @@ const DEFAULTS: AppConfig = {
   keyBubble: true,
   showState: false,
   autoLaunch: false,
-  scale: 1
+  scale: 1,
+  compatRender: false
 }
 
 let cache: AppConfig | null = null
@@ -58,7 +61,9 @@ export function loadConfig(): AppConfig {
         keyBubble: typeof raw.keyBubble === 'boolean' ? raw.keyBubble : DEFAULTS.keyBubble,
         showState: typeof raw.showState === 'boolean' ? raw.showState : DEFAULTS.showState,
         autoLaunch: typeof raw.autoLaunch === 'boolean' ? raw.autoLaunch : DEFAULTS.autoLaunch,
-        scale: clampScale(raw.scale)
+        scale: clampScale(raw.scale),
+        compatRender:
+          typeof raw.compatRender === 'boolean' ? raw.compatRender : DEFAULTS.compatRender
       }
       return cache
     }

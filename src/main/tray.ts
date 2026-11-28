@@ -1,4 +1,4 @@
-import { Tray, Menu, app, nativeImage, BrowserWindow } from 'electron'
+import { Tray, Menu, app, nativeImage, BrowserWindow, clipboard, dialog } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { saveConfig } from './config'
@@ -26,7 +26,8 @@ function resolveTrayIconPath(): string | null {
 export function createTray(
   win: BrowserWindow,
   config: AppConfig,
-  onLocomotion: (cmd: LocomotionCmd) => void
+  onLocomotion: (cmd: LocomotionCmd) => void,
+  buildDiagnostics: () => string
 ): Tray {
   const iconPath = resolveTrayIconPath()
   if (!iconPath) {
@@ -67,6 +68,43 @@ export function createTray(
     { type: 'separator' },
     { label: '向上跳一层', click: () => onLocomotion('jump-up') },
     { label: '向下跳一层', click: () => onLocomotion('jump-down') },
+    { type: 'separator' },
+    {
+      label: '复制诊断信息',
+      click: () => {
+        clipboard.writeText(buildDiagnostics())
+        void dialog.showMessageBox({
+          type: 'info',
+          title: '已复制',
+          message: '诊断信息已复制到剪贴板',
+          detail: '反馈问题时直接粘贴即可，其中包含系统、显示器、缩放、显卡与最近日志。'
+        })
+      }
+    },
+    {
+      label: '兼容渲染（关闭 GPU 合成，重启生效）',
+      type: 'checkbox',
+      checked: config.compatRender,
+      click: (item) => {
+        config.compatRender = item.checked
+        saveConfig(config)
+        void dialog
+          .showMessageBox({
+            type: 'question',
+            title: '需要重启',
+            message: item.checked ? '已开启兼容渲染' : '已关闭兼容渲染',
+            detail: '该设置需要重启小笨狗后才生效。',
+            buttons: ['立即重启', '稍后'],
+            defaultId: 0,
+            cancelId: 1
+          })
+          .then(({ response }) => {
+            if (response !== 0) return
+            app.relaunch()
+            app.quit()
+          })
+      }
+    },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() }
   ])

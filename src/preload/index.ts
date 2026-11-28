@@ -98,6 +98,15 @@ const api = {
     }
   },
 
+  /** 主进程 → 渲染层：显示器增删 / 缩放变化，需重新读取 devicePixelRatio */
+  onDisplayChanged: (cb: () => void): (() => void) => {
+    const handler = (): void => cb()
+    ipcRenderer.on(IPC_CHANNELS.DISPLAY_CHANGED, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.DISPLAY_CHANGED, handler)
+    }
+  },
+
   /** 主进程 → 渲染层：托盘发起的行走 / 停下指令 */
   onLocomotion: (cb: (cmd: LocomotionCmd) => void): (() => void) => {
     const handler = (_e: Electron.IpcRendererEvent, cmd: LocomotionCmd): void => cb(cmd)

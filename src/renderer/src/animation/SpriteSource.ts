@@ -18,6 +18,12 @@ const ART_SCALE = W / ART_SIZE
 
 /** 帧缓存预算：约 32 MB，超出后按最近使用时间回收旧片段（正在播放的片段不受限） */
 const FRAME_BUDGET_BYTES = 32 * 1024 * 1024
+/**
+ * 常驻片段（拖拽三段）总预算。
+ * 解码尺寸按「缩放 × devicePixelRatio」，高 DPI 下三段体积可能翻倍，
+ * 因此按预算只常驻放得下的片段，放不下的仍走 LRU 现解码。
+ */
+const RETAIN_BUDGET_BYTES = 140 * 1024 * 1024
 /** 同时解码的帧数上限，避免一次并发上百个文件把内存顶上去 */
 const MAX_CONCURRENT_LOADS = 6
 /** 刚解码的片段在这段时间内优先保留，避免预加载完立刻被别的片段挤掉 */
@@ -263,10 +269,17 @@ class SpriteSource implements AnimationSource {
   /**
    * 预热并常驻指定片段。拖拽三段合计远超普通片段，若不常驻会被 LRU 反复挤掉，
    * 每次拖拽都要重新解码，表现为动作整体延迟。
+   * 高 DPI 下解码尺寸变大，按 RETAIN_BUDGET_BYTES 逐段判断，放不下的不常驻。
    */
   async retain(clipIds: readonly string[]): Promise<void> {
-    for (const id of clipIds) this.retained.add(id)
-    await Promise.allSettled(clipIds.map((id) => this.load(id)))
+    for (const id of clipIds) {
+      const clip = await this.load(id).catch(() => null)
+      if (!clip) continue
+      const entry = this.entries.get(id)
+      if (!entry) continue
+      if (this.retainedBytes() + entry.bytes > RETAIN_BUDGET_BYTES) continue
+      this.retained.add(id)
+    }
   }
 
   private async build(clipId: string): Promise<CacheEntry> {
@@ -383,12 +396,17 @@ class SpriteSource implements AnimationSource {
 
   /** 计入预算的字节数：常驻片段单独算，不挤占按需片段的空间 */
   private budgetUsed(): number {
-    let retainedBytes = 0
+    return this.bytes - this.retainedBytes()
+  }
+
+  /** 常驻片段占用的字节数 */
+  private retainedBytes(): number {
+    let total = 0
     for (const id of this.retained) {
       const entry = this.entries.get(id)
-      if (entry) retainedBytes += entry.bytes
+      if (entry) total += entry.bytes
     }
-    return this.bytes - retainedBytes
+    return total
   }
 
   private drop(clipId: string): void {

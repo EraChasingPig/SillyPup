@@ -1,6 +1,11 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, screen } from 'electron'
 import { join } from 'path'
-import { createPetWindow, applyPetScale, startTopmostWatchdog } from './window'
+import {
+  createPetWindow,
+  applyPetScale,
+  keepPetOnScreen,
+  startTopmostWatchdog
+} from './window'
 import { createTray } from './tray'
 import { startInteraction } from './interaction'
 import type { InteractionController } from './interaction'
@@ -17,7 +22,7 @@ import type { Mover } from './mover'
 import { createJumpMover } from './jumpMover'
 import type { JumpMover } from './jumpMover'
 import { loadConfig, saveConfig } from './config'
-import { setupLogger, logInfo } from './logger'
+import { setupLogger, logInfo, logError, readLogTail } from './logger'
 import { applyAutoLaunch } from './autoLaunch'
 import { IPC_CHANNELS } from '../shared/types'
 import type {
@@ -37,9 +42,10 @@ app.commandLine.appendSwitch(
   'disable-features',
   disabledFeatures ? `${disabledFeatures},CalculateNativeWinOcclusion` : 'CalculateNativeWinOcclusion'
 )
-// 桌宠是几百像素的小透明窗，软件绘制完全够用；
-// 硬件加速会让 GPU 进程常驻并吃掉两三百 MB 显存，关掉后整体内存稳定在 200 MB 左右。
-app.disableHardwareAcceleration()
+// 硬件加速（GPU 合成）默认开启。
+// 关掉 GPU 后透明窗口在软件合成 + 非 100% 显示缩放下会被系统错误拉伸：
+// 拖拽时角色横向/纵向拉长、苹果窗持续变大（125% 横向、150% 纵向，实测必现）。
+// 极老显卡 / 远程桌面若出现透明窗黑块，可在托盘打开「兼容渲染」关闭 GPU 合成。
 
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 
@@ -73,6 +79,8 @@ if (!gotLock) {
   const maskStore = new HitMaskStore()
   const bubble = new BubbleWindow()
   const config = loadConfig()
+  // GPU 合成必须在应用就绪前决定；兼容模式给软件合成兜底
+  if (config.compatRender) app.disableHardwareAcceleration()
 
   // 任务栏 / 通知归属需要固定的 AppUserModelID，与 electron-builder 的 appId 保持一致
   app.setAppUserModelId('com.sillypup.desktop')
@@ -85,19 +93,83 @@ if (!gotLock) {
     // 每次启动按配置同步一次登录项，防止用户手动删掉注册表后状态不一致
     applyAutoLaunch(config.autoLaunch)
     logInfo(`app ready, userData=${app.getPath('userData')}`)
+    logInfo(
+      'displays',
+      JSON.stringify(
+        screen.getAllDisplays().map((d) => ({
+          id: d.id,
+          bounds: d.bounds,
+          workArea: d.workArea,
+          scaleFactor: d.scaleFactor
+        }))
+      ),
+      `compatRender=${config.compatRender}`
+    )
+    void app
+      .getGPUInfo('basic')
+      .then((info) => logInfo('gpu', JSON.stringify(info)))
+      .catch((err) => logError('gpu info failed', err))
 
     const petWindow = createPetWindow(config.scale)
     win = petWindow
     stopTopmostWatchdog = startTopmostWatchdog(petWindow)
     const walkMover = createMover(petWindow, () => config.scale)
     mover = walkMover
-    const verticalMover = createJumpMover(petWindow)
+    const verticalMover = createJumpMover(petWindow, () => config.scale)
     jumpMover = verticalMover
     const apple = new AppleWindow(petWindow, () => config.scale)
     appleWindow = apple
-    tray = createTray(petWindow, config, (cmd) => {
-      petWindow.webContents.send(IPC_CHANNELS.LOCOMOTION, cmd)
-    })
+
+    // 诊断信息：托盘一键复制。用户反馈 bug 时即使开发者无法复现，
+    // 也能从这段文本里看到系统、显示器、缩放、渲染模式与窗口位置
+    const buildDiagnostics = (): string => {
+      const displays = screen.getAllDisplays().map((d) => ({
+        id: d.id,
+        bounds: d.bounds,
+        workArea: d.workArea,
+        scaleFactor: d.scaleFactor
+      }))
+      return [
+        `version: ${app.getVersion()} (packaged=${app.isPackaged})`,
+        `platform: ${process.platform} ${process.getSystemVersion()}`,
+        `render: ${config.compatRender ? 'software (compat)' : 'gpu'}`,
+        `scale: ${config.scale}`,
+        `primary: ${JSON.stringify(screen.getPrimaryDisplay().workArea)}`,
+        `displays: ${JSON.stringify(displays)}`,
+        `window: ${JSON.stringify(petWindow.getBounds())}`,
+        '--- main.log (tail) ---',
+        readLogTail()
+      ].join('\n')
+    }
+
+    // 显示器增删/缩放变化：夹回有效屏、结束苹果轮次，并让渲染层按新 DPR 重建画布
+    const handleDisplayChange = (reason: string): void => {
+      logInfo(
+        `display ${reason}`,
+        JSON.stringify(
+          screen.getAllDisplays().map((d) => ({
+            id: d.id,
+            bounds: d.bounds,
+            scaleFactor: d.scaleFactor
+          }))
+        )
+      )
+      keepPetOnScreen(petWindow, config.scale)
+      apple.end()
+      petWindow.webContents.send(IPC_CHANNELS.DISPLAY_CHANGED)
+    }
+    screen.on('display-added', () => handleDisplayChange('added'))
+    screen.on('display-removed', () => handleDisplayChange('removed'))
+    screen.on('display-metrics-changed', () => handleDisplayChange('metrics-changed'))
+
+    tray = createTray(
+      petWindow,
+      config,
+      (cmd) => {
+        petWindow.webContents.send(IPC_CHANNELS.LOCOMOTION, cmd)
+      },
+      buildDiagnostics
+    )
 
     const service = new PomodoroService({
       onTick: (remainMs, running) => {

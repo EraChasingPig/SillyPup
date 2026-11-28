@@ -116,7 +116,8 @@ export class BubbleWindow {
     x = clamp(x, wa.x, wa.x + wa.width - BUBBLE_W)
     y = clamp(y, wa.y, wa.y + wa.height - BUBBLE_H)
 
-    win.setPosition(x, y)
+    // 非整数缩放下 setPosition 会被系统撑大窗口，统一改用带显式尺寸的 setBounds
+    win.setBounds({ x, y, width: BUBBLE_W, height: BUBBLE_H })
   }
 
   private clearTimer(): void {
